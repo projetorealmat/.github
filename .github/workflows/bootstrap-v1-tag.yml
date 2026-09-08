@@ -1,0 +1,33 @@
+name: Bootstrap central v1 tag
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    if: github.event.before == '5a78a89fdec76b072baf406ce1046bc933b55937'
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_SHA: 5a78a89fdec76b072baf406ce1046bc933b55937
+    steps:
+      - name: Criar ou validar a tag v1
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/v1" >/dev/null 2>&1; then
+            existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/v1" --jq '.object.sha')"
+            [[ "${existing_sha}" == "${TARGET_SHA}" ]] || {
+              echo "A tag v1 já existe e aponta para outro commit."
+              exit 1
+            }
+            exit 0
+          fi
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+            -f ref="refs/tags/v1" \
+            -f sha="${TARGET_SHA}"
