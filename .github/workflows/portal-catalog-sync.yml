@@ -1,0 +1,200 @@
+name: REALMat — sincronizar catálogo do portal
+
+on:
+  workflow_call:
+    inputs:
+      payload:
+        description: JSON do client_payload recebido pelo repository_dispatch
+        required: true
+        type: string
+      catalog_file:
+        description: Caminho do catálogo JSON
+        required: false
+        type: string
+        default: _data/books.json
+      validator_script:
+        description: Script local que valida o catálogo
+        required: false
+        type: string
+        default: scripts/validate_catalog.py
+    secrets:
+      REALMAT_AUTOMATION_PRIVATE_KEY:
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: realmat-catalog-sync-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  propose:
+    name: Abrir e enfileirar PR do catálogo
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Criar token da REALMat Automation
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.REALMAT_AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.REALMAT_AUTOMATION_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+
+      - name: Checkout main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Validar payload e atualizar catálogo
+        id: catalog
+        env:
+          DISPATCH_PAYLOAD: ${{ inputs.payload }}
+          CATALOG_FILE: ${{ inputs.catalog_file }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          payload = json.loads(os.environ["DISPATCH_PAYLOAD"] or "{}")
+          book = payload.get("book")
+          if not isinstance(book, dict):
+              raise SystemExit("O payload deve conter o objeto book.")
+
+          required_book = ("id", "title", "short_title", "subject")
+          required_release = (
+              "version", "status", "repository", "ref", "release_url",
+              "pdf_url", "pdf_path", "sha256",
+          )
+          missing = [
+              key for key in required_book + required_release
+              if not isinstance(book.get(key), str) or not book[key].strip()
+          ]
+          if missing:
+              raise SystemExit(f"Payload incompleto: {', '.join(missing)}")
+          if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", book["id"]):
+              raise SystemExit("id do livro inválido.")
+          version_match = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", book["version"])
+          if version_match is None or book["ref"] != book["version"]:
+              raise SystemExit("A versão e a ref devem ser a mesma tag semver.")
+          if not re.fullmatch(r"[^/\s]+/[^/\s]+", book["repository"]):
+              raise SystemExit("repository inválido.")
+          if not re.fullmatch(r"[0-9a-f]{64}", book["sha256"]):
+              raise SystemExit("sha256 inválido.")
+          major, minor, patch = (int(part) for part in version_match.groups())
+          expected_status = (
+              "em revisão" if major == 0 else
+              "tradução aprovada" if (major, minor, patch) == (1, 0, 0) else
+              "versão revisada" if major == 1 else
+              "nova versão"
+          )
+          if book["status"] != expected_status:
+              raise SystemExit("Status editorial incompatível com a versão.")
+          expected_pdf_path = f"/assets/books/{book['id']}/{book['version']}/"
+          if not book["pdf_path"].startswith(expected_pdf_path) or not book["pdf_path"].endswith(".pdf"):
+              raise SystemExit("pdf_path não segue o contrato versionado do portal.")
+          if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", book.get("release_date", "")):
+              raise SystemExit("release_date deve usar AAAA-MM-DD.")
+
+          release = {key: book[key] for key in required_release}
+          release["release_date"] = book["release_date"]
+          catalog_path = Path(os.environ["CATALOG_FILE"])
+          catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+
+          def version_key(value: str) -> tuple[int, int, int]:
+              return tuple(int(part) for part in value[1:].split("."))
+
+          book_record = {key: book[key] for key in required_book}
+          book_record["current_version"] = book["version"]
+          changed = False
+          for item in catalog:
+              if item.get("id") != book["id"]:
+                  continue
+              existing = item.get("releases") or []
+              replaced = False
+              for index, candidate in enumerate(existing):
+                  if candidate.get("version") == release["version"]:
+                      if candidate != release:
+                          existing[index] = release
+                          changed = True
+                      replaced = True
+                      break
+              if not replaced:
+                  existing.append(release)
+                  changed = True
+              if any(item.get(key) != value for key, value in book_record.items()):
+                  changed = True
+              item.update(book_record)
+              item["releases"] = sorted(existing, key=lambda candidate: version_key(candidate["version"]), reverse=True)
+              break
+          else:
+              catalog.append({**book_record, "releases": [release]})
+              changed = True
+
+          rendered = json.dumps(catalog, ensure_ascii=False, indent=2) + "\n"
+          if catalog_path.read_text(encoding="utf-8") != rendered:
+              changed = True
+              catalog_path.write_text(rendered, encoding="utf-8")
+
+          branch = f"automation/catalog-{book['id']}-{book['version']}-{os.environ['GITHUB_RUN_ID']}"
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"changed={'true' if changed else 'false'}\n")
+              output.write(f"branch={branch}\n")
+              output.write(f"book_id={book['id']}\n")
+              output.write(f"version={book['version']}\n")
+              output.write(f"release_url={book['release_url']}\n")
+          PY
+
+          python3 "${{ inputs.validator_script }}" "${{ inputs.catalog_file }}"
+
+      - name: Publicar branch de automação
+        if: steps.catalog.outputs.changed == 'true'
+        env:
+          BOOK_ID: ${{ steps.catalog.outputs.book_id }}
+          VERSION: ${{ steps.catalog.outputs.version }}
+          BRANCH: ${{ steps.catalog.outputs.branch }}
+        run: |
+          set -euo pipefail
+          git config user.name "REALMat Automation"
+          git config user.email "realmat-automation[bot]@users.noreply.github.com"
+          git switch -c "${BRANCH}"
+          git add "${{ inputs.catalog_file }}"
+          git commit -m "chore(catalog): sync ${BOOK_ID} ${VERSION}"
+          git push --set-upstream origin "${BRANCH}"
+
+      - name: Criar PR do catálogo e solicitar auto-merge
+        if: steps.catalog.outputs.changed == 'true'
+        env:
+          BOOK_ID: ${{ steps.catalog.outputs.book_id }}
+          VERSION: ${{ steps.catalog.outputs.version }}
+          BRANCH: ${{ steps.catalog.outputs.branch }}
+          RELEASE_URL: ${{ steps.catalog.outputs.release_url }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "${RUNNER_TEMP}/catalog-pr-body.md" <<EOF
+          ## Atualização automática do catálogo
+
+          Esta PR registra a release **${VERSION}** de **${BOOK_ID}**.
+
+          Fonte: ${RELEASE_URL}
+
+          O auto-merge foi solicitado e só poderá ocorrer depois que todos os checks obrigatórios do portal passarem.
+          EOF
+          pr_url="$(gh pr create \
+            --base main \
+            --head "${BRANCH}" \
+            --title "chore(catalog): atualizar ${BOOK_ID} para ${VERSION}" \
+            --body-file "${RUNNER_TEMP}/catalog-pr-body.md")"
+          pr_number="${pr_url##*/}"
+          [[ "${pr_number}" =~ ^[0-9]+$ ]] || { echo "Não foi possível obter o número da PR: ${pr_url}"; exit 1; }
+          gh pr merge "${pr_number}" --auto --squash --delete-branch

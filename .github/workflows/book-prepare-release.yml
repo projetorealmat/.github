@@ -1,0 +1,232 @@
+name: REALMat — preparar Release PR do livro
+
+on:
+  workflow_call:
+    inputs:
+      config:
+        description: Caminho do arquivo JSON de configuração do livro
+        required: false
+        type: string
+        default: .realmat/book.json
+      version:
+        description: Próxima versão sem o prefixo v
+        required: true
+        type: string
+      release_date:
+        description: Data da publicação em AAAA-MM-DD
+        required: true
+        type: string
+    secrets:
+      REALMAT_AUTOMATION_PRIVATE_KEY:
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: realmat-prepare-release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Criar Release PR
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Criar token da REALMat Automation
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.REALMAT_AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.REALMAT_AUTOMATION_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+
+      - name: Checkout main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Validar configuração, versão e data
+        id: release
+        shell: bash
+        env:
+          CONFIG: ${{ inputs.config }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+          REQUESTED_DATE: ${{ inputs.release_date }}
+        run: |
+          set -euo pipefail
+          python3 - "${CONFIG}" "${REQUESTED_VERSION}" "${REQUESTED_DATE}" <<'PY'
+          import json
+          import os
+          import re
+          import sys
+          from datetime import date
+          from pathlib import Path
+
+          config_path, version, release_date = sys.argv[1:]
+          config = json.loads(Path(config_path).read_text(encoding="utf-8"))
+          required = (
+              "id", "title", "pdf_name", "citation_file", "readme_file",
+              "readme_current_block_start", "readme_current_block_end",
+              "readme_version_sentence_anchor", "portal_repository",
+          )
+          missing = [key for key in required if not config.get(key)]
+          if missing:
+              raise SystemExit(f"Configuração do livro incompleta: {', '.join(missing)}")
+          if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", config["id"]):
+              raise SystemExit("id do livro inválido.")
+          if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+              raise SystemExit("A versão deve seguir MAJOR.MINOR.PATCH, sem o prefixo v.")
+          try:
+              date.fromisoformat(release_date)
+          except ValueError as error:
+              raise SystemExit("A data deve seguir AAAA-MM-DD e ser válida.") from error
+
+          citation = Path(config["citation_file"]).read_text(encoding="utf-8")
+          match = re.search(
+              r"^version:\s*[\"']?([0-9]+\.[0-9]+\.[0-9]+)[\"']?\s*$",
+              citation,
+              re.MULTILINE,
+          )
+          if match is None:
+              raise SystemExit("CITATION.cff não contém uma versão semântica válida.")
+          current = tuple(map(int, match.group(1).split(".")))
+          requested = tuple(map(int, version.split(".")))
+          if requested <= current:
+              raise SystemExit(
+                  f"A próxima versão ({version}) deve ser maior que a versão atual ({match.group(1)})."
+              )
+
+          release_tag = f"v{version}"
+          release_branch = f"release/{release_tag}"
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"release_tag={release_tag}\n")
+              output.write(f"release_branch={release_branch}\n")
+              output.write(f"citation_file={config['citation_file']}\n")
+              output.write(f"readme_file={config['readme_file']}\n")
+          PY
+
+          release_tag="${{ steps.release.outputs.release_tag }}"
+          release_branch="${{ steps.release.outputs.release_branch }}"
+          if git ls-remote --exit-code --refs origin "refs/tags/${release_tag}" >/dev/null 2>&1; then
+            echo "A tag ${release_tag} já existe e não pode ser reutilizada."
+            exit 1
+          fi
+          if git ls-remote --exit-code --heads origin "${release_branch}" >/dev/null 2>&1; then
+            echo "A branch ${release_branch} já existe."
+            exit 1
+          fi
+
+      - name: Atualizar CITATION.cff e README
+        shell: bash
+        env:
+          CONFIG: ${{ inputs.config }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+          REQUESTED_DATE: ${{ inputs.release_date }}
+        run: |
+          set -euo pipefail
+          python3 - "${CONFIG}" "${REQUESTED_VERSION}" "${REQUESTED_DATE}" <<'PY'
+          import json
+          import os
+          import re
+          import sys
+          from pathlib import Path
+
+          config_path, version, release_date = sys.argv[1:]
+          config = json.loads(Path(config_path).read_text(encoding="utf-8"))
+          release_tag = f"v{version}"
+
+          citation_path = Path(config["citation_file"])
+          citation = citation_path.read_text(encoding="utf-8")
+          citation, version_count = re.subn(
+              r"^version:\s*.*$",
+              f'version: "{version}"',
+              citation,
+              count=1,
+              flags=re.MULTILINE,
+          )
+          citation, date_count = re.subn(
+              r"^date-released:\s*.*$",
+              f"date-released: {release_date}",
+              citation,
+              count=1,
+              flags=re.MULTILINE,
+          )
+          if version_count != 1 or date_count != 1:
+              raise SystemExit("Não foi possível atualizar CITATION.cff de forma inequívoca.")
+          citation_path.write_text(citation, encoding="utf-8")
+
+          readme_path = Path(config["readme_file"])
+          readme = readme_path.read_text(encoding="utf-8")
+          start = config["readme_current_block_start"]
+          end = config["readme_current_block_end"]
+          if readme.count(start) != 1 or readme.count(end) != 1:
+              raise SystemExit("O bloco de PDF recomendado do README deve ser único.")
+          replacement = (
+              f"{start}\n"
+              f"- [PDF da versão atualmente recomendada](https://github.com/{os.environ['GITHUB_REPOSITORY']}/releases/download/{release_tag}/{config['pdf_name']}) ({release_tag})\n"
+              f"{end}"
+          )
+          readme, block_count = re.subn(
+              re.escape(start) + r".*?" + re.escape(end),
+              replacement,
+              readme,
+              count=1,
+              flags=re.DOTALL,
+          )
+          if block_count != 1:
+              raise SystemExit("Não foi possível atualizar o bloco de PDF do README.")
+
+          anchor = config["readme_version_sentence_anchor"]
+          lines = readme.splitlines()
+          matching = [index for index, line in enumerate(lines) if anchor in line]
+          if len(matching) != 1:
+              raise SystemExit("A frase de versão recomendada do README deve ser única.")
+          lines[matching[0]] = config.get(
+              "readme_version_sentence_template",
+              "A versão atualmente recomendada é `{version}`, ainda em revisão editorial.",
+          ).format(version=release_tag)
+          readme_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+          PY
+          git diff --check
+
+      - name: Criar branch e commit da Release PR
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          RELEASE_BRANCH: ${{ steps.release.outputs.release_branch }}
+          RELEASE_TAG: ${{ steps.release.outputs.release_tag }}
+          RELEASE_DATE: ${{ inputs.release_date }}
+          CITATION_FILE: ${{ steps.release.outputs.citation_file }}
+          README_FILE: ${{ steps.release.outputs.readme_file }}
+        run: |
+          set -euo pipefail
+          git config user.name "REALMat Automation"
+          git config user.email "realmat-automation[bot]@users.noreply.github.com"
+          git switch -c "${RELEASE_BRANCH}"
+          git add "${{ inputs.config }}" "${CITATION_FILE}" "${README_FILE}"
+          git commit -m "chore(release): prepare ${RELEASE_TAG}"
+          git push --set-upstream origin "${RELEASE_BRANCH}"
+
+          cat > "${RUNNER_TEMP}/release-pr-body.md" <<EOF
+          ## Release PR — ${RELEASE_TAG}
+
+          Esta PR representa a intenção explícita de publicar **${RELEASE_TAG}** em **${RELEASE_DATE}**.
+
+          - Atualiza \`CITATION.cff\` e as referências de versão do README.
+          - Os checks do livro devem passar antes do merge.
+          - O merge desta PR autoriza a criação da tag, do PDF final e do GitHub Release.
+          - Após a publicação, o portal receberá uma proposta automática de atualização do catálogo.
+
+          Não adicione mudanças de conteúdo a esta PR.
+          EOF
+
+          gh pr create \
+            --base main \
+            --head "${RELEASE_BRANCH}" \
+            --title "release: ${GITHUB_REPOSITORY##*/} ${RELEASE_TAG}" \
+            --body-file "${RUNNER_TEMP}/release-pr-body.md"
