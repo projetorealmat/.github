@@ -188,6 +188,10 @@ def test_actual_config_validators() -> None:
 
     unsafe_pretext_values = (
         ("pdf_name", "../escape.pdf", "pdf_name deve ser um nome de arquivo simples e seguro."),
+        ("pdf_name", "aata-*.pdf", "pdf_name deve ser um nome de arquivo simples e seguro."),
+        ("pdf_name", "aata?.pdf", "pdf_name deve ser um nome de arquivo simples e seguro."),
+        ("pdf_name", "aata[0].pdf", "pdf_name deve ser um nome de arquivo simples e seguro."),
+        ("pdf_name", "aata].pdf", "pdf_name deve ser um nome de arquivo simples e seguro."),
         ("pretext_project_file", "../project.ptx", "pretext_project_file deve ser um caminho relativo e seguro."),
         ("pretext_pdf_target", "../print", "pretext_pdf_target deve ser um nome de alvo seguro."),
         ("pretext_web_target", "-web", "pretext_web_target deve ser um nome de alvo seguro."),

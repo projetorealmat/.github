@@ -175,7 +175,9 @@ jobs:
               or not pdf_name
               or "/" in pdf_name
               or "\\" in pdf_name
-              or pdf_name in {".", ".."}
+              or ".." in pdf_name
+              or any(character in pdf_name for character in "*?[]")
+              or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", pdf_name)
           ):
               raise SystemExit("pdf_name deve ser um nome de arquivo simples e seguro.")
           if build_system == "pretext":
