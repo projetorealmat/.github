@@ -1,0 +1,8 @@
+{
+  "pretext_project_file": "project.ptx",
+  "pretext_pdf_target": "print",
+  "pretext_web_target": "web",
+  "pdf_name": "aata.pdf",
+  "pdf_version_marker": "Versão: ",
+  "pdf_status_marker": "Status: "
+}

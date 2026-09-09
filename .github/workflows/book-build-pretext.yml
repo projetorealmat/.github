@@ -1,0 +1,209 @@
+name: REALMat — compilar livro PreTeXt
+
+on:
+  workflow_call:
+    inputs:
+      release_commit:
+        description: Commit imutável da Release PR
+        required: true
+        type: string
+      release_tag:
+        description: Tag de release usada na validação do PDF
+        required: true
+        type: string
+      release_status:
+        description: Status editorial usado na validação do PDF
+        required: true
+        type: string
+      pretext_project_file:
+        description: Caminho do project.ptx no repositório do livro
+        required: true
+        type: string
+      pretext_pdf_target:
+        description: Alvo PDF declarado em project.ptx
+        required: true
+        type: string
+      pretext_web_target:
+        description: Alvo web declarado em project.ptx
+        required: true
+        type: string
+      pretext_requirements_file:
+        description: Arquivo requirements.txt com a versão fixada do PreTeXt
+        required: false
+        default: requirements.txt
+        type: string
+      pretext_checksum_file:
+        description: Caminho opcional que receberá o checksum do PDF no workspace
+        required: false
+        default: ""
+        type: string
+      pdf_name:
+        description: Nome final e estável do PDF da release
+        required: true
+        type: string
+      pdf_version_marker:
+        description: Prefixo opcional do marcador de versão no PDF
+        required: false
+        default: ""
+        type: string
+      pdf_status_marker:
+        description: Prefixo opcional do marcador de status no PDF
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Compilar e validar PreTeXt
+    runs-on: ubuntu-24.04
+    outputs:
+      pdf_sha256: ${{ steps.digest.outputs.pdf_sha256 }}
+
+    env:
+      RELEASE_COMMIT: ${{ inputs.release_commit }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+      RELEASE_STATUS: ${{ inputs.release_status }}
+      PRETEXT_PROJECT_FILE: ${{ inputs.pretext_project_file }}
+      PRETEXT_PDF_TARGET: ${{ inputs.pretext_pdf_target }}
+      PRETEXT_WEB_TARGET: ${{ inputs.pretext_web_target }}
+      PRETEXT_REQUIREMENTS_FILE: ${{ inputs.pretext_requirements_file }}
+      PRETEXT_CHECKSUM_FILE: ${{ inputs.pretext_checksum_file }}
+      PDF_NAME: ${{ inputs.pdf_name }}
+      PDF_VERSION_MARKER: ${{ inputs.pdf_version_marker }}
+      PDF_STATUS_MARKER: ${{ inputs.pdf_status_marker }}
+
+    steps:
+      - name: Checkout do commit da Release PR
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.release_commit }}
+          fetch-depth: 0
+
+      - name: Checkout dos validadores centrais
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: projetorealmat/.github
+          ref: ${{ github.workflow_sha }}
+          path: .realmat-workflows
+
+      - name: Configurar Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Instalar PreTeXt e ferramentas do PDF
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "${PRETEXT_REQUIREMENTS_FILE}" || {
+            echo "Arquivo requirements.txt PreTeXt inexistente: ${PRETEXT_REQUIREMENTS_FILE}"
+            exit 1
+          }
+          python -m pip install --requirement "${PRETEXT_REQUIREMENTS_FILE}"
+          sudo apt-get update
+          sudo apt-get install -y poppler-utils texlive-xetex
+
+      - name: Registrar ambiente de compilação
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            printf 'Runner: ubuntu-24.04\n'
+            printf 'Python: '; python --version
+            printf 'PreTeXt: '; pretext --version
+            printf 'XeLaTeX: '; xelatex --version | head -n1
+          } > build-environment.txt
+
+      - name: Validar projeto e construir os alvos configurados
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "${PRETEXT_PROJECT_FILE}" || {
+            echo "Arquivo de projeto PreTeXt inexistente: ${PRETEXT_PROJECT_FILE}"
+            exit 1
+          }
+          project_root="$(dirname "${PRETEXT_PROJECT_FILE}")"
+          project_file="$(basename "${PRETEXT_PROJECT_FILE}")"
+          (
+            cd "${project_root}"
+            test -f "${project_file}"
+            pretext build --clean "${PRETEXT_PDF_TARGET}"
+            pretext build --clean "${PRETEXT_WEB_TARGET}"
+          )
+          echo "PRETEXT_PROJECT_ROOT=${project_root}" >> "${GITHUB_ENV}"
+
+      - name: Normalizar e validar os artefatos PreTeXt
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_dir="${RUNNER_TEMP}/pretext-release"
+          mkdir -p "${release_dir}"
+          python3 .realmat-workflows/scripts/validate_pretext_output.py \
+            --pdf-dir "${PRETEXT_PROJECT_ROOT}/output/${PRETEXT_PDF_TARGET}" \
+            --pdf-output "${release_dir}/${PDF_NAME}" \
+            --web-dir "${PRETEXT_PROJECT_ROOT}/output/${PRETEXT_WEB_TARGET}" \
+            --release-tag "${RELEASE_TAG}" \
+            --release-status "${RELEASE_STATUS}" \
+            --version-marker "${PDF_VERSION_MARKER}" \
+            --status-marker "${PDF_STATUS_MARKER}"
+          (
+            cd "${PRETEXT_PROJECT_ROOT}/output/${PRETEXT_WEB_TARGET}"
+            find . -type f \( -name '*.woff' -o -name '*.woff2' -o -name '*.ttf' -o -name '*.otf' \) -print0 \
+              | tar --null --files-from=- -czf "${release_dir}/pretext-fonts.tar.gz"
+          )
+          (
+            cd "${release_dir}"
+            sha256sum "${PDF_NAME}" > SHA256SUMS
+            sha256sum --check SHA256SUMS
+          )
+          if [[ -n "${PRETEXT_CHECKSUM_FILE}" ]]; then
+            checksum_file="${PRETEXT_PROJECT_ROOT}/${PRETEXT_CHECKSUM_FILE}"
+            mkdir -p "$(dirname "${checksum_file}")"
+            cp "${release_dir}/SHA256SUMS" "${checksum_file}"
+          fi
+
+      - name: Registrar checksum do PDF
+        id: digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          pdf_sha256="$(sha256sum "${RUNNER_TEMP}/pretext-release/${PDF_NAME}" | awk '{print $1}')"
+          echo "pdf_sha256=${pdf_sha256}" >> "${GITHUB_OUTPUT}"
+
+      - name: Publicar PDF intermediário
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pretext-release-pdf
+          path: ${{ runner.temp }}/pretext-release/${{ inputs.pdf_name }}
+          if-no-files-found: error
+
+      - name: Publicar fontes intermediárias
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pretext-release-fonts
+          path: ${{ runner.temp }}/pretext-release/pretext-fonts.tar.gz
+          if-no-files-found: error
+
+      - name: Publicar checksum intermediário
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pretext-release-checksums
+          path: ${{ runner.temp }}/pretext-release/SHA256SUMS
+          if-no-files-found: error
+
+      - name: Publicar saída web intermediária
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pretext-release-web
+          path: ${{ env.PRETEXT_PROJECT_ROOT }}/output/${{ inputs.pretext_web_target }}
+          if-no-files-found: error
+
+      - name: Publicar ambiente de compilação
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pretext-build-environment
+          path: build-environment.txt
+          if-no-files-found: error

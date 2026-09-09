@@ -268,9 +268,27 @@ jobs:
               output.write(f"release_is_prerelease={prerelease}\n")
           PY
 
-  build:
+  build-pretext:
+    name: Compilar artefatos PreTeXt
+    needs: resolve
+    if: needs.resolve.outputs.build_system == 'pretext'
+    uses: ./.github/workflows/book-build-pretext.yml
+    with:
+      release_commit: ${{ needs.resolve.outputs.release_commit }}
+      release_tag: ${{ needs.resolve.outputs.release_tag }}
+      release_status: ${{ needs.resolve.outputs.release_status }}
+      pretext_project_file: ${{ needs.resolve.outputs.pretext_project_file }}
+      pretext_pdf_target: ${{ needs.resolve.outputs.pretext_pdf_target }}
+      pretext_web_target: ${{ needs.resolve.outputs.pretext_web_target }}
+      pretext_checksum_file: ${{ needs.resolve.outputs.pretext_checksum_file }}
+      pdf_name: ${{ needs.resolve.outputs.pdf_name }}
+      pdf_version_marker: ${{ needs.resolve.outputs.pdf_version_marker }}
+      pdf_status_marker: ${{ needs.resolve.outputs.pdf_status_marker }}
+
+  build-latex:
     name: Compilar e publicar release
     needs: resolve
+    if: needs.resolve.outputs.build_system == 'latex'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -448,9 +466,175 @@ jobs:
             fi
           fi
 
+  release-pretext:
+    name: Publicar release PreTeXt
+    needs: [resolve, build-pretext]
+    if: always() && needs.resolve.outputs.build_system == 'pretext' && needs.build-pretext.result == 'success'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: read
+    outputs:
+      pdf_sha256: ${{ steps.digest.outputs.pdf_sha256 }}
+
+    env:
+      RELEASE_PR_NUMBER: ${{ needs.resolve.outputs.release_pr_number }}
+      RELEASE_COMMIT: ${{ needs.resolve.outputs.release_commit }}
+      RELEASE_BASE_SHA: ${{ needs.resolve.outputs.release_base_sha }}
+      RELEASE_TAG: ${{ needs.resolve.outputs.release_tag }}
+      RELEASE_DATE: ${{ needs.resolve.outputs.release_date }}
+      RELEASE_STATUS: ${{ needs.resolve.outputs.release_status }}
+      RELEASE_IS_PRERELEASE: ${{ needs.resolve.outputs.release_is_prerelease }}
+      PDF_NAME: ${{ needs.resolve.outputs.pdf_name }}
+      SOURCE_PREFIX: ${{ needs.resolve.outputs.source_prefix }}
+      VALIDATION_SCRIPT: ${{ needs.resolve.outputs.validation_script }}
+
+    steps:
+      - name: Checkout do commit da release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.resolve.outputs.release_commit }}
+          fetch-depth: 0
+
+      - name: Baixar o PDF PreTeXt validado
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: pretext-release-pdf
+          path: pretext-release-assets
+
+      - name: Baixar as fontes PreTeXt compactadas
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: pretext-release-fonts
+          path: pretext-release-assets
+
+      - name: Baixar o checksum PreTeXt
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: pretext-release-checksums
+          path: pretext-release-assets
+
+      - name: Baixar o ambiente de compilação PreTeXt
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: pretext-build-environment
+          path: pretext-release-assets
+
+      - name: Baixar a saída web PreTeXt
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: pretext-release-web
+          path: pretext-release-assets/web
+
+      - name: Validar artefatos intermediários
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s "pretext-release-assets/${PDF_NAME}"
+          test -s pretext-release-assets/pretext-fonts.tar.gz
+          test -s pretext-release-assets/build-environment.txt
+          test -f pretext-release-assets/web/index.html
+          (
+            cd pretext-release-assets
+            sha256sum --check SHA256SUMS
+          )
+          git diff --check "${RELEASE_BASE_SHA}" "${RELEASE_COMMIT}"
+          if [[ -n "${VALIDATION_SCRIPT}" ]]; then
+            python3 "${VALIDATION_SCRIPT}" .
+          fi
+
+      - name: Empacotar fonte e checksums da release
+        id: digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          metadata_file="${SOURCE_PREFIX}-${RELEASE_TAG}-metadata.txt"
+          source_dir="${SOURCE_PREFIX}-${RELEASE_TAG}-source"
+          source_asset="${source_dir}.tar.gz"
+          release_date_display="$(date -u -d "${RELEASE_DATE}" +%d/%m/%Y)"
+          {
+            printf 'Livro: %s\n' "${GITHUB_REPOSITORY}"
+            printf 'Versão: %s\n' "${RELEASE_TAG}"
+            printf 'Data de publicação: %s\n' "${release_date_display}"
+            printf 'Status editorial: %s\n' "${RELEASE_STATUS}"
+            printf 'Commit: %s\n' "${RELEASE_COMMIT}"
+            printf 'Release PR: #%s\n' "${RELEASE_PR_NUMBER}"
+            printf 'Repositório: https://github.com/%s\n' "${GITHUB_REPOSITORY}"
+          } > "${metadata_file}"
+          git archive --format=tar --prefix="${source_dir}/" "${RELEASE_COMMIT}" | tar -x
+          cp "${metadata_file}" "${source_dir}/"
+          cp pretext-release-assets/build-environment.txt "${source_dir}/"
+          tar -czf "${source_asset}" "${source_dir}"
+          cp pretext-release-assets/SHA256SUMS pretext-build-SHA256SUMS
+          cp pretext-release-assets/build-environment.txt build-environment.txt
+          cp pretext-release-assets/pretext-fonts.tar.gz pretext-fonts.tar.gz
+          tar -czf pretext-web.tar.gz -C pretext-release-assets/web .
+          sha256sum "${PDF_NAME}" "${source_asset}" "${metadata_file}" \
+            pretext-fonts.tar.gz pretext-web.tar.gz build-environment.txt \
+            pretext-build-SHA256SUMS > SHA256SUMS
+          pdf_sha256="$(sha256sum "${PDF_NAME}" | awk '{print $1}')"
+          echo "pdf_sha256=${pdf_sha256}" >> "${GITHUB_OUTPUT}"
+          echo "RELEASE_METADATA=${metadata_file}" >> "${GITHUB_ENV}"
+          echo "SOURCE_ASSET=${source_asset}" >> "${GITHUB_ENV}"
+
+      - name: Criar ou validar tag imutável
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --refs origin "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+            git fetch origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+            [[ "$(git rev-parse "${RELEASE_TAG}^{commit}")" == "${RELEASE_COMMIT}" ]] || {
+              echo "A tag ${RELEASE_TAG} aponta para outro commit."
+              exit 1
+            }
+          else
+            git tag -a "${RELEASE_TAG}" "${RELEASE_COMMIT}" -m "${SOURCE_PREFIX} ${RELEASE_TAG}"
+            git push origin "refs/tags/${RELEASE_TAG}"
+          fi
+
+      - name: Criar ou completar GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          assets=("${PDF_NAME}" pretext-fonts.tar.gz pretext-web.tar.gz "${SOURCE_ASSET}" "${RELEASE_METADATA}" build-environment.txt SHA256SUMS pretext-build-SHA256SUMS)
+          if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            is_draft="$(gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --json isDraft --jq '.isDraft')"
+            if [[ "${is_draft}" == "true" ]]; then
+              gh release upload "${RELEASE_TAG}" "${assets[@]}" --repo "${GITHUB_REPOSITORY}" --clobber
+            else
+              echo "A release publicada não será modificada."
+            fi
+          else
+            flags=(--draft)
+            [[ "${RELEASE_IS_PRERELEASE}" == "true" ]] && flags+=(--prerelease)
+            gh release create "${RELEASE_TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --target "${RELEASE_COMMIT}" \
+              --title "${SOURCE_PREFIX} ${RELEASE_TAG} — ${RELEASE_STATUS}" \
+              --generate-notes "${flags[@]}"
+            gh release upload "${RELEASE_TAG}" "${assets[@]}" --repo "${GITHUB_REPOSITORY}"
+          fi
+          if [[ "$(gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --json isDraft --jq '.isDraft')" == "true" ]]; then
+            if [[ "${RELEASE_IS_PRERELEASE}" == "true" ]]; then
+              gh release edit "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --draft=false --prerelease
+            else
+              gh release edit "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --draft=false --prerelease=false
+            fi
+          fi
+
   dispatch:
     name: Propor atualização do catálogo
-    needs: [resolve, build]
+    needs: [resolve, build-latex, release-pretext]
+    if: >-
+      always() &&
+      ((needs.resolve.outputs.build_system == 'latex' && needs.build-latex.result == 'success') ||
+      (needs.resolve.outputs.build_system == 'pretext' && needs.release-pretext.result == 'success'))
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -470,7 +654,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.resolve.outputs.release_tag }}
           PDF_NAME: ${{ needs.resolve.outputs.pdf_name }}
-          EXPECTED_SHA256: ${{ needs.build.outputs.pdf_sha256 }}
+          EXPECTED_SHA256: ${{ needs.resolve.outputs.build_system == 'pretext' && needs.release-pretext.outputs.pdf_sha256 || needs.build-latex.outputs.pdf_sha256 }}
           RELEASE_STATUS: ${{ needs.resolve.outputs.release_status }}
           RELEASE_DATE: ${{ needs.resolve.outputs.release_date }}
           PORTAL_REPOSITORY: ${{ needs.resolve.outputs.portal_repository }}
@@ -529,4 +713,3 @@ jobs:
         run: |
           set -euo pipefail
           gh api --method POST "repos/${PORTAL_REPOSITORY}/dispatches" --input "${RUNNER_TEMP}/catalog-dispatch.json"
-
