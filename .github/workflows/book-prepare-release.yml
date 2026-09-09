@@ -75,13 +75,20 @@ jobs:
           config_path, version, release_date = sys.argv[1:]
           config = json.loads(Path(config_path).read_text(encoding="utf-8"))
           build_system = config.get("build_system", "latex")
-          if build_system not in {"latex", "pretext"}:
+          if not isinstance(build_system, str) or build_system not in {"latex", "pretext"}:
               raise SystemExit("build_system deve ser 'latex' ou 'pretext'.")
-          required = (
+          common_required = (
               "id", "title", "pdf_name", "citation_file", "readme_file",
               "readme_current_block_start", "readme_current_block_end",
               "readme_version_sentence_anchor", "portal_repository",
           )
+          if build_system == "latex":
+              required = common_required
+          else:
+              required = common_required + (
+                  "pretext_project_file", "pretext_pdf_target",
+                  "pretext_web_target",
+              )
           missing = [key for key in required if not config.get(key)]
           if missing:
               raise SystemExit(f"Configuração do livro incompleta: {', '.join(missing)}")
@@ -238,3 +245,4 @@ jobs:
             --head "${RELEASE_BRANCH}" \
             --title "release: ${GITHUB_REPOSITORY##*/} ${RELEASE_TAG}" \
             --body-file "${RUNNER_TEMP}/release-pr-body.md"
+

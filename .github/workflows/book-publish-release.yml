@@ -141,7 +141,7 @@ jobs:
 
           config = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
           build_system = config.get("build_system", "latex")
-          if build_system not in {"latex", "pretext"}:
+          if not isinstance(build_system, str) or build_system not in {"latex", "pretext"}:
               raise SystemExit("build_system deve ser 'latex' ou 'pretext'.")
           required = (
               "id", "title", "short_title", "subject", "pdf_name",
@@ -529,3 +529,4 @@ jobs:
         run: |
           set -euo pipefail
           gh api --method POST "repos/${PORTAL_REPOSITORY}/dispatches" --input "${RUNNER_TEMP}/catalog-dispatch.json"
+
