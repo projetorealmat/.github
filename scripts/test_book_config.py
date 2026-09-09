@@ -25,14 +25,17 @@ def embedded_validator(workflow_name: str, step_name: str) -> str:
     return textwrap.dedent(workflow[start:end])
 
 
-def run_validator(script: str, config: dict, *arguments: str) -> subprocess.CompletedProcess[str]:
+def run_validator(
+    script: str,
+    config: dict,
+    *arguments: str,
+    citation: str = 'version: "0.1.0"\ndate-released: 2026-09-01\n',
+) -> subprocess.CompletedProcess[str]:
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
         config_path = root / "book.json"
         config_path.write_text(json.dumps(config), encoding="utf-8")
-        (root / "CITATION.cff").write_text(
-            'version: "0.1.0"\ndate-released: 2026-09-01\n', encoding="utf-8"
-        )
+        (root / "CITATION.cff").write_text(citation, encoding="utf-8")
         environment = dict(os.environ, GITHUB_OUTPUT=str(root / "github-output"))
         return subprocess.run(
             [sys.executable, "-", str(config_path), *arguments],
@@ -80,6 +83,34 @@ def workflow_call_input_default(workflow: str, input_name: str) -> str:
 
 def assert_contains(workflow: str, expected: str, description: str) -> None:
     assert expected in workflow, f"{description}: esperado {expected!r}"
+
+
+def run_citation_update(citation: str) -> tuple[subprocess.CompletedProcess[str], str]:
+    script = embedded_validator("book-prepare-release.yml", "Atualizar CITATION.cff e README")
+    config = read_fixture("book-config-pretext.json")
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        config_path = root / "book.json"
+        config_path.write_text(json.dumps(config), encoding="utf-8")
+        citation_path = root / "CITATION.cff"
+        citation_path.write_text(citation, encoding="utf-8")
+        (root / "README.md").write_text(
+            "<!-- release-pdf-current:start -->\n"
+            "- Ainda não há PDF.\n"
+            "<!-- release-pdf-current:end -->\n"
+            "A versão atualmente recomendada é uma prévia.\n",
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            [sys.executable, "-", str(config_path), "0.1.1", "2026-09-09"],
+            input=script,
+            text=True,
+            cwd=root,
+            env=dict(os.environ, GITHUB_REPOSITORY="projetorealmat/aata"),
+            capture_output=True,
+            check=False,
+        )
+        return result, citation_path.read_text(encoding="utf-8")
 
 
 def assert_base_branch_contract(prepare: str, publish: str) -> None:
@@ -211,7 +242,47 @@ def test_actual_config_validators() -> None:
         )
 
 
+def test_prepare_initial_validation_accepts_citation_without_date() -> None:
+    prepare = embedded_validator("book-prepare-release.yml", "Validar configuração, versão e data")
+    result = run_validator(
+        prepare,
+        read_fixture("book-config-pretext.json"),
+        "0.1.1",
+        "2026-09-09",
+        citation='version: "0.1.0"\n',
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_prepare_update_inserts_missing_citation_date() -> None:
+    result, updated = run_citation_update('version: "0.1.0"\n')
+    assert result.returncode == 0, result.stderr
+    assert 'version: "0.1.1"' in updated
+    assert updated.count("date-released: 2026-09-09") == 1
+
+
+def test_prepare_update_replaces_existing_citation_date() -> None:
+    result, updated = run_citation_update(
+        'version: "0.1.0"\ndate-released: 2026-01-01\n'
+    )
+    assert result.returncode == 0, result.stderr
+    assert updated.count("date-released: 2026-09-09") == 1
+    assert "date-released: 2026-01-01" not in updated
+
+
+def test_prepare_update_rejects_multiple_citation_dates() -> None:
+    result, _ = run_citation_update(
+        'version: "0.1.0"\ndate-released: 2026-01-01\ndate-released: 2026-02-01\n'
+    )
+    assert result.returncode != 0
+    assert "date-released" in result.stderr
+
+
 if __name__ == "__main__":
     test_base_branch_contract()
     test_actual_config_validators()
+    test_prepare_initial_validation_accepts_citation_without_date()
+    test_prepare_update_inserts_missing_citation_date()
+    test_prepare_update_replaces_existing_citation_date()
+    test_prepare_update_rejects_multiple_citation_dates()
     print("book configuration contract tests passed")
