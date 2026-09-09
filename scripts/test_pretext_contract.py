@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Static contract tests for the reusable PreTeXt backend."""
 
+import os
 from pathlib import Path
+import subprocess
+from tempfile import TemporaryDirectory
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +17,54 @@ BUILD_SCRIPT = ROOT / "scripts/build-book.sh"
 
 def require(text: str, fragment: str, source: Path) -> None:
     assert fragment in text, f"{fragment!r} não encontrado em {source}"
+
+
+def test_pretext_build_accepts_document_named_pdf() -> None:
+    """PreTeXt may emit the source document name instead of main.pdf."""
+    with TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        fake_bin = root / "bin"
+        fake_bin.mkdir()
+        fake_pretext = fake_bin / "pretext"
+        fake_pretext.write_text(
+            """#!/usr/bin/env bash
+set -euo pipefail
+[[ \"$1\" == \"build\" ]]
+case \"$2\" in
+  print)
+    mkdir -p output/print
+    printf 'fake pdf' > output/print/aata.pdf
+    ;;
+  web)
+    mkdir -p output/web
+    printf '<!doctype html>' > output/web/index.html
+    ;;
+esac
+""",
+            encoding="utf-8",
+        )
+        fake_pretext.chmod(0o755)
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "BUILD_SYSTEM": "pretext",
+                "PDF_NAME": "aata.pdf",
+                "PRETEXT_PROJECT_FILE": "project.ptx",
+                "PRETEXT_PDF_TARGET": "print",
+                "PRETEXT_WEB_TARGET": "web",
+                "PATH": f"{fake_bin}:{environment['PATH']}",
+            }
+        )
+        result = subprocess.run(
+            ["bash", str(BUILD_SCRIPT)],
+            cwd=root,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (root / "aata.pdf").read_bytes() == b"fake pdf"
 
 
 def main() -> None:
@@ -33,6 +84,8 @@ def main() -> None:
         require(text, "PRETEXT_GENERATE:", workflow)
         require(text, "PRETEXT_CACHED_ASSETS_SOURCE:", workflow)
         require(text, "PRETEXT_CACHED_ASSETS_DESTINATION:", workflow)
+
+    test_pretext_build_accepts_document_named_pdf()
 
 
 if __name__ == "__main__":

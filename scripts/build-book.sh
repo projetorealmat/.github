@@ -34,8 +34,18 @@ if [[ "${BUILD_SYSTEM}" == "pretext" ]]; then
     test -d "${web_path}" || { echo "Saída web PreTeXt não encontrada: ${web_path}"; exit 1; }
     test -s "${web_path}/index.html" || { echo "Página inicial PreTeXt não encontrada: ${web_path}/index.html"; exit 1; }
   fi
-  pdf_path="$(dirname "${PRETEXT_PROJECT_FILE}")/output/${PRETEXT_PDF_TARGET}/main.pdf"
-  test -f "${pdf_path}" || { echo "PDF PreTeXt não encontrado: ${pdf_path}"; exit 1; }
+  pdf_output_dir="$(dirname "${PRETEXT_PROJECT_FILE}")/output/${PRETEXT_PDF_TARGET}"
+  pdf_path="${pdf_output_dir}/$(basename "${PDF_NAME}")"
+  if [[ ! -f "${pdf_path}" ]]; then
+    shopt -s nullglob
+    pretext_pdfs=("${pdf_output_dir}"/*.pdf)
+    shopt -u nullglob
+    if (( ${#pretext_pdfs[@]} != 1 )); then
+      echo "PDF PreTeXt não encontrado de forma inequívoca em: ${pdf_output_dir}"
+      exit 1
+    fi
+    pdf_path="${pretext_pdfs[0]}"
+  fi
   cp "${pdf_path}" "${PDF_NAME}"
 elif [[ "${BUILD_SYSTEM}" == "latex" ]]; then
   : "${LATEX_ENTRYPOINT:?LATEX_ENTRYPOINT is required}"
