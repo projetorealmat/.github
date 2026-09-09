@@ -1,0 +1,132 @@
+name: REALMat — verificar livro
+
+on:
+  workflow_call:
+    inputs:
+      config:
+        description: Arquivo de configuração do livro
+        required: false
+        type: string
+        default: .realmat/book.json
+      commit:
+        description: Commit do livro a ser compilado
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Compilar backend declarado
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout do livro
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.commit }}
+          fetch-depth: 0
+
+      - name: Checkout dos scripts REALMat
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .realmat-central
+
+      - name: Ler configuração
+        id: config
+        env:
+          CONFIG: ${{ inputs.config }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - "${CONFIG}" <<'PY'
+          import json
+          import os
+          import re
+          import sys
+          from pathlib import Path
+
+          config = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          required = ("build_system", "pdf_name")
+          missing = [key for key in required if not config.get(key)]
+          if missing:
+              raise SystemExit(f"Configuração incompleta: {', '.join(missing)}")
+          if config["build_system"] == "pretext":
+              required = ("pretext_project_file", "pretext_pdf_target")
+          elif config["build_system"] == "latex":
+              required = ("latex_entrypoint",)
+          else:
+              raise SystemExit("build_system inválido.")
+          missing = [key for key in required if not config.get(key)]
+          if missing:
+              raise SystemExit(f"Configuração incompleta: {', '.join(missing)}")
+          values = {
+              "build_system": config["build_system"],
+              "pdf_name": config["pdf_name"],
+              "pretext_project_file": config.get("pretext_project_file", ""),
+              "pretext_pdf_target": config.get("pretext_pdf_target", ""),
+              "pretext_web_target": config.get("pretext_web_target", ""),
+              "pretext_requirements_file": config.get("pretext_requirements_file", "requirements.txt"),
+              "latex_entrypoint": config.get("latex_entrypoint", ""),
+              "latex_engine": config.get("latex_engine", "xelatex"),
+          }
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              for key, value in values.items():
+                  output.write(f"{key}={value}\n")
+          PY
+
+      - name: Configurar Python
+        if: steps.config.outputs.build_system == 'pretext'
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependências de compilação
+        env:
+          BUILD_SYSTEM: ${{ steps.config.outputs.build_system }}
+          PRETEXT_REQUIREMENTS_FILE: ${{ steps.config.outputs.pretext_requirements_file }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            texlive-latex-base \
+            texlive-latex-recommended \
+            texlive-latex-extra \
+            texlive-fonts-recommended \
+            texlive-fonts-extra \
+            texlive-lang-english \
+            texlive-lang-portuguese \
+            texlive-xetex \
+            latexmk \
+            poppler-utils \
+            pdf2svg \
+            nodejs \
+            npm
+          if [[ "${BUILD_SYSTEM}" == "pretext" ]]; then
+            python -m pip install --requirement "${PRETEXT_REQUIREMENTS_FILE}"
+          fi
+
+      - name: Compilar
+        env:
+          BUILD_SYSTEM: ${{ steps.config.outputs.build_system }}
+          PDF_NAME: ${{ steps.config.outputs.pdf_name }}
+          PRETEXT_PROJECT_FILE: ${{ steps.config.outputs.pretext_project_file }}
+          PRETEXT_PDF_TARGET: ${{ steps.config.outputs.pretext_pdf_target }}
+          PRETEXT_WEB_TARGET: ${{ steps.config.outputs.pretext_web_target }}
+          LATEX_ENTRYPOINT: ${{ steps.config.outputs.latex_entrypoint }}
+          LATEX_ENGINE: ${{ steps.config.outputs.latex_engine }}
+        shell: bash
+        run: bash .realmat-central/scripts/build-book.sh
+
+      - name: Verificar PDF
+        env:
+          PDF_NAME: ${{ steps.config.outputs.pdf_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          pdftotext -layout "${PDF_NAME}" "${RUNNER_TEMP}/book.txt"
+          test -s "${RUNNER_TEMP}/book.txt"
+          sha256sum "${PDF_NAME}"
