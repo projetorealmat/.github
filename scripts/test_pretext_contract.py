@@ -73,6 +73,7 @@ def test_latex_workflows_install_common_extra_dependencies() -> None:
         text = workflow.read_text(encoding="utf-8")
         require(text, "texlive-bibtex-extra", workflow)
         require(text, "texlive-games", workflow)
+        require(text, "texlive-lang-german", workflow)
 
 
 def main() -> None:

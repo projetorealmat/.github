@@ -232,6 +232,7 @@ jobs:
             texlive-games \
             texlive-lang-english \
             texlive-lang-portuguese \
+            texlive-lang-german \
             texlive-xetex \
             latexmk \
             poppler-utils \
