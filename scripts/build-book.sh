@@ -12,6 +12,7 @@ if [[ "${BUILD_SYSTEM}" == "pretext" ]]; then
     pretext build "${PRETEXT_WEB_TARGET}"
     web_path="$(dirname "${PRETEXT_PROJECT_FILE}")/output/${PRETEXT_WEB_TARGET}"
     test -d "${web_path}" || { echo "Saída web PreTeXt não encontrada: ${web_path}"; exit 1; }
+    test -s "${web_path}/index.html" || { echo "Página inicial PreTeXt não encontrada: ${web_path}/index.html"; exit 1; }
   fi
   pdf_path="$(dirname "${PRETEXT_PROJECT_FILE}")/output/${PRETEXT_PDF_TARGET}/main.pdf"
   test -f "${pdf_path}" || { echo "PDF PreTeXt não encontrado: ${pdf_path}"; exit 1; }
