@@ -111,6 +111,12 @@ jobs:
               or "\n" in readme_end
           ):
               raise SystemExit("Marcadores do README inválidos.")
+          sentence_anchor = config.get("readme_version_sentence_anchor", "")
+          sentence_template = config.get("readme_version_sentence_template", "")
+          if bool(sentence_anchor) != bool(sentence_template):
+              raise SystemExit("Os campos de atualização da frase de versão devem ser informados juntos.")
+          if sentence_template and "{version}" not in sentence_template:
+              raise SystemExit("readme_version_sentence_template deve conter {version}.")
           release_tag = f"v{version}"
           release_branch = f"release/{release_tag}"
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
@@ -123,6 +129,8 @@ jobs:
                   "readme_file": readme_file,
                   "readme_start": readme_start,
                   "readme_end": readme_end,
+                  "sentence_anchor": sentence_anchor,
+                  "sentence_template": sentence_template,
               }.items():
                   output.write(f"{key}={value}\n")
           PY
@@ -145,16 +153,18 @@ jobs:
           README_FILE: ${{ steps.release.outputs.readme_file }}
           README_START: ${{ steps.release.outputs.readme_start }}
           README_END: ${{ steps.release.outputs.readme_end }}
+          README_SENTENCE_ANCHOR: ${{ steps.release.outputs.sentence_anchor }}
+          README_SENTENCE_TEMPLATE: ${{ steps.release.outputs.sentence_template }}
         shell: bash
         run: |
           set -euo pipefail
-          python3 - "${CONFIG}" "${RELEASE_TAG}" "${RELEASE_DATE}" "${CITATION_FILE}" "${README_FILE}" "${README_START}" "${README_END}" <<'PY'
+          python3 - "${CONFIG}" "${RELEASE_TAG}" "${RELEASE_DATE}" "${CITATION_FILE}" "${README_FILE}" "${README_START}" "${README_END}" "${README_SENTENCE_ANCHOR}" "${README_SENTENCE_TEMPLATE}" <<'PY'
           import os
           import re
           import sys
           from pathlib import Path
 
-          _, tag, release_date, citation_name, readme_name, start, end = sys.argv[1:]
+          _, tag, release_date, citation_name, readme_name, start, end, sentence_anchor, sentence_template = sys.argv[1:]
           citation_path = Path(citation_name)
           citation = citation_path.read_text(encoding="utf-8")
           citation, count = re.subn(
@@ -185,6 +195,19 @@ jobs:
               f"{end}"
           )
           readme = re.sub(re.escape(start) + r".*?" + re.escape(end), replacement, readme, count=1, flags=re.DOTALL)
+          if sentence_anchor:
+              sentence_pattern = re.compile(
+                  rf"^[^\n]*{re.escape(sentence_anchor)}[^\n]*$",
+                  re.MULTILINE,
+              )
+              sentence_replacement = sentence_template.format(version=tag)
+              readme, sentence_count = sentence_pattern.subn(
+                  sentence_replacement,
+                  readme,
+                  count=1,
+              )
+              if sentence_count != 1:
+                  raise SystemExit("README não contém a frase de versão configurada.")
           readme_path.write_text(readme, encoding="utf-8")
           PY
           git diff --check
