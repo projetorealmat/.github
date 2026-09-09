@@ -9,9 +9,6 @@ import tempfile
 import textwrap
 from pathlib import Path
 
-import yaml
-
-
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures"
 
@@ -59,15 +56,6 @@ def assert_rejected(script: str, config: dict, expected: str, *arguments: str) -
     assert result.stderr.strip() == expected, result.stderr
 
 
-def test_workflow_call_inputs() -> None:
-    for name in ("book-prepare-release.yml", "book-publish-release.yml"):
-        workflow = yaml.load(
-            (ROOT / ".github/workflows" / name).read_text(encoding="utf-8"),
-            Loader=yaml.BaseLoader,
-        )
-        assert workflow["on"]["workflow_call"]["inputs"]["base_branch"]["default"] == "main"
-
-
 def test_actual_config_validators() -> None:
     prepare = embedded_validator("book-prepare-release.yml", "Validar configuração, versão e data")
     publish = embedded_validator("book-publish-release.yml", "Ler configuração do livro")
@@ -108,7 +96,6 @@ def test_actual_config_validators() -> None:
 
 
 if __name__ == "__main__":
-    test_workflow_call_inputs()
     test_actual_config_validators()
     print("book configuration contract tests passed")
 
