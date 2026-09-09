@@ -1,0 +1,19 @@
+{
+  "id": "aata",
+  "title": "AATA",
+  "short_title": "AATA",
+  "subject": "matemática",
+  "pdf_name": "aata.pdf",
+  "citation_file": "CITATION.cff",
+  "readme_file": "README.md",
+  "readme_current_block_start": "<!-- release-pdf-current:start -->",
+  "readme_current_block_end": "<!-- release-pdf-current:end -->",
+  "readme_version_sentence_anchor": "A versão atualmente recomendada é",
+  "source_prefix": "aata",
+  "portal_repository": "projetorealmat/projetorealmat.github.io",
+  "build_system": "pretext",
+  "pretext_project_file": "project.ptx",
+  "pretext_pdf_target": "pdf",
+  "pretext_web_target": "web",
+  "pretext_checksum_file": "output/aata.pdf.sha256"
+}

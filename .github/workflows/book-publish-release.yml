@@ -8,6 +8,11 @@ on:
         required: false
         type: string
         default: .realmat/book.json
+      base_branch:
+        description: Branch base usada para a Release PR
+        required: false
+        type: string
+        default: main
       release_pr:
         description: Número de uma Release PR já mesclada para recuperação manual
         required: false
@@ -40,6 +45,11 @@ jobs:
       release_status: ${{ steps.metadata.outputs.release_status }}
       release_is_prerelease: ${{ steps.metadata.outputs.release_is_prerelease }}
       pdf_name: ${{ steps.config.outputs.pdf_name }}
+      build_system: ${{ steps.config.outputs.build_system }}
+      pretext_project_file: ${{ steps.config.outputs.pretext_project_file }}
+      pretext_pdf_target: ${{ steps.config.outputs.pretext_pdf_target }}
+      pretext_web_target: ${{ steps.config.outputs.pretext_web_target }}
+      pretext_checksum_file: ${{ steps.config.outputs.pretext_checksum_file }}
       source_prefix: ${{ steps.config.outputs.source_prefix }}
       tex_entrypoint: ${{ steps.config.outputs.tex_entrypoint }}
       build_metadata_file: ${{ steps.config.outputs.build_metadata_file }}
@@ -54,10 +64,10 @@ jobs:
       pdf_status_marker: ${{ steps.config.outputs.pdf_status_marker }}
 
     steps:
-      - name: Checkout main
+      - name: Checkout da branch base
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: main
+          ref: ${{ inputs.base_branch }}
           fetch-depth: 0
 
       - name: Resolver e validar a Release PR
@@ -67,6 +77,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
           REQUESTED_PR_NUMBER: ${{ inputs.release_pr }}
+          BASE_BRANCH: ${{ inputs.base_branch }}
         shell: bash
         run: |
           set -euo pipefail
@@ -89,15 +100,15 @@ jobs:
           merge_commit="$(jq -r '.merge_commit_sha // ""' <<< "${pr_json}")"
 
           [[ "${merged}" == "true" ]] || { echo "A PR #${pr_number} não foi mesclada."; exit 1; }
-          [[ "${base_ref}" == "main" ]] || { echo "A Release PR deve ter main como base."; exit 1; }
+          [[ "${base_ref}" == "${BASE_BRANCH}" ]] || { echo "A Release PR deve ter ${BASE_BRANCH} como base."; exit 1; }
           [[ "${head_repo}" == "${GITHUB_REPOSITORY}" ]] || { echo "A Release PR deve ser interna."; exit 1; }
           [[ "${head_ref}" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Branch de release inválida."; exit 1; }
           [[ "${merge_commit}" =~ ^[0-9a-f]{40}$ ]] || { echo "Commit mesclado inválido."; exit 1; }
           [[ "${base_sha}" =~ ^[0-9a-f]{40}$ ]] || { echo "Commit-base inválido."; exit 1; }
 
-          git fetch --no-tags origin main
-          git merge-base --is-ancestor "${merge_commit}" origin/main || {
-            echo "O commit da Release PR deve estar contido em main."
+          git fetch --no-tags origin "${BASE_BRANCH}"
+          git merge-base --is-ancestor "${merge_commit}" "origin/${BASE_BRANCH}" || {
+            echo "O commit da Release PR deve estar contido em ${BASE_BRANCH}."
             exit 1
           }
 
@@ -129,14 +140,28 @@ jobs:
           from pathlib import Path
 
           config = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          build_system = config.get("build_system", "latex")
+          if build_system not in {"latex", "pretext"}:
+              raise SystemExit("build_system deve ser 'latex' ou 'pretext'.")
           required = (
               "id", "title", "short_title", "subject", "pdf_name",
-              "source_prefix", "tex_entrypoint", "build_metadata_file",
-              "portal_repository", "pdf_version_marker", "pdf_status_marker",
+              "source_prefix", "portal_repository",
           )
+          if build_system == "latex":
+              required += (
+                  "tex_entrypoint", "build_metadata_file",
+                  "pdf_version_marker", "pdf_status_marker",
+              )
+          else:
+              required += (
+                  "pretext_project_file", "pretext_pdf_target",
+                  "pretext_web_target",
+              )
           missing = [key for key in required if not config.get(key)]
           if missing:
               raise SystemExit(f"Configuração do livro incompleta: {', '.join(missing)}")
+          if "pretext_checksum_file" in config and not isinstance(config["pretext_checksum_file"], str):
+              raise SystemExit("pretext_checksum_file deve ser uma string quando informado.")
           if not re.fullmatch(r"[^/\s]+/[^/\s]+", config["portal_repository"]):
               raise SystemExit("portal_repository inválido.")
           portal_name = config["portal_repository"].split("/", 1)[1]
@@ -146,17 +171,22 @@ jobs:
               values = {
                   "book_id": config["id"],
                   "pdf_name": config["pdf_name"],
+                  "build_system": build_system,
+                  "pretext_project_file": config.get("pretext_project_file", ""),
+                  "pretext_pdf_target": config.get("pretext_pdf_target", ""),
+                  "pretext_web_target": config.get("pretext_web_target", ""),
+                  "pretext_checksum_file": config.get("pretext_checksum_file", ""),
                   "source_prefix": config["source_prefix"],
-                  "tex_entrypoint": config["tex_entrypoint"],
-                  "build_metadata_file": config["build_metadata_file"],
+                  "tex_entrypoint": config.get("tex_entrypoint", ""),
+                  "build_metadata_file": config.get("build_metadata_file", ""),
                   "validation_script": validation_script,
                   "portal_repository": config["portal_repository"],
                   "portal_name": portal_name,
                   "book_title": config["title"],
                   "book_short_title": config["short_title"],
                   "book_subject": config["subject"],
-                  "pdf_version_marker": config["pdf_version_marker"],
-                  "pdf_status_marker": config["pdf_status_marker"],
+                  "pdf_version_marker": config.get("pdf_version_marker", ""),
+                  "pdf_status_marker": config.get("pdf_status_marker", ""),
               }
               for key, value in values.items():
                   output.write(f"{key}={value}\n")
@@ -259,6 +289,11 @@ jobs:
       RELEASE_STATUS: ${{ needs.resolve.outputs.release_status }}
       RELEASE_IS_PRERELEASE: ${{ needs.resolve.outputs.release_is_prerelease }}
       PDF_NAME: ${{ needs.resolve.outputs.pdf_name }}
+      BUILD_SYSTEM: ${{ needs.resolve.outputs.build_system }}
+      PRETEXT_PROJECT_FILE: ${{ needs.resolve.outputs.pretext_project_file }}
+      PRETEXT_PDF_TARGET: ${{ needs.resolve.outputs.pretext_pdf_target }}
+      PRETEXT_WEB_TARGET: ${{ needs.resolve.outputs.pretext_web_target }}
+      PRETEXT_CHECKSUM_FILE: ${{ needs.resolve.outputs.pretext_checksum_file }}
       SOURCE_PREFIX: ${{ needs.resolve.outputs.source_prefix }}
       TEX_ENTRYPOINT: ${{ needs.resolve.outputs.tex_entrypoint }}
       BUILD_METADATA_FILE: ${{ needs.resolve.outputs.build_metadata_file }}

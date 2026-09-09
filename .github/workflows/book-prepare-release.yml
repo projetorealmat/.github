@@ -8,6 +8,11 @@ on:
         required: false
         type: string
         default: .realmat/book.json
+      base_branch:
+        description: Branch base usada para a Release PR
+        required: false
+        type: string
+        default: main
       version:
         description: Próxima versão sem o prefixo v
         required: true
@@ -43,10 +48,10 @@ jobs:
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
 
-      - name: Checkout main
+      - name: Checkout da branch base
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: main
+          ref: ${{ inputs.base_branch }}
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
 
@@ -69,6 +74,9 @@ jobs:
 
           config_path, version, release_date = sys.argv[1:]
           config = json.loads(Path(config_path).read_text(encoding="utf-8"))
+          build_system = config.get("build_system", "latex")
+          if build_system not in {"latex", "pretext"}:
+              raise SystemExit("build_system deve ser 'latex' ou 'pretext'.")
           required = (
               "id", "title", "pdf_name", "citation_file", "readme_file",
               "readme_current_block_start", "readme_current_block_end",
@@ -226,7 +234,7 @@ jobs:
           EOF
 
           gh pr create \
-            --base main \
+            --base "${{ inputs.base_branch }}" \
             --head "${RELEASE_BRANCH}" \
             --title "release: ${GITHUB_REPOSITORY##*/} ${RELEASE_TAG}" \
             --body-file "${RUNNER_TEMP}/release-pr-body.md"

@@ -1,0 +1,18 @@
+{
+  "id": "forallx",
+  "title": "forallx: Lógica",
+  "short_title": "forallx",
+  "subject": "lógica formal",
+  "pdf_name": "forallx.pdf",
+  "citation_file": "CITATION.cff",
+  "readme_file": "README.md",
+  "readme_current_block_start": "<!-- release-pdf-current:start -->",
+  "readme_current_block_end": "<!-- release-pdf-current:end -->",
+  "readme_version_sentence_anchor": "A versão atualmente recomendada é",
+  "source_prefix": "forallx",
+  "tex_entrypoint": "forallx.tex",
+  "build_metadata_file": "forallx-build-metadata.tex",
+  "portal_repository": "projetorealmat/projetorealmat.github.io",
+  "pdf_version_marker": "Edição brasileira: ",
+  "pdf_status_marker": "Status editorial: "
+}
