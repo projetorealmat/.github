@@ -111,16 +111,41 @@ def assert_contract_failure(prepare: str, publish: str) -> None:
     raise AssertionError("A mutação deveria violar o contrato de base_branch.")
 
 
+def replace_once(workflow: str, previous: str, replacement: str) -> str:
+    assert workflow.count(previous) == 1, f"Mutação ambígua ou ausente: {previous!r}"
+    return workflow.replace(previous, replacement, 1)
+
+
 def test_base_branch_contract() -> None:
     prepare = (ROOT / ".github/workflows/book-prepare-release.yml").read_text(encoding="utf-8")
     publish = (ROOT / ".github/workflows/book-publish-release.yml").read_text(encoding="utf-8")
     expression = "${{ inputs.base_branch }}"
 
     assert_base_branch_contract(prepare, publish)
-    assert_contract_failure(prepare.replace("default: main", "default: master", 1), publish)
-    assert_contract_failure(prepare.replace(f'--base "{expression}"', "--base main", 1), publish)
-    assert_contract_failure(prepare, publish.replace(f"ref: {expression}", "ref: main", 1))
-    assert_contract_failure(prepare, publish.replace(f"BASE_BRANCH: {expression}", "", 1))
+    assert_contract_failure(replace_once(prepare, "default: main", "default: master"), publish)
+    assert_contract_failure(prepare, replace_once(publish, "default: main", "default: master"))
+    assert_contract_failure(replace_once(prepare, f"ref: {expression}", "ref: main"), publish)
+    assert_contract_failure(
+        replace_once(prepare, f'--base "{expression}"', "--base main"),
+        publish,
+    )
+    assert_contract_failure(prepare, replace_once(publish, f"ref: {expression}", "ref: main"))
+    assert_contract_failure(
+        prepare,
+        replace_once(publish, f"BASE_BRANCH: {expression}", "BASE_BRANCH: main"),
+    )
+    assert_contract_failure(
+        prepare,
+        replace_once(
+            publish,
+            '[[ "${base_ref}" == "${BASE_BRANCH}" ]]',
+            '[[ "${base_ref}" == "main" ]]',
+        ),
+    )
+    assert_contract_failure(
+        prepare,
+        replace_once(publish, '"origin/${BASE_BRANCH}"', '"origin/main"'),
+    )
 
 
 def test_actual_config_validators() -> None:
