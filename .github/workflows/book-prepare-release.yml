@@ -63,7 +63,7 @@ jobs:
           import os
           import re
           import sys
-          from datetime import date
+          from datetime import date, datetime, timezone
           from pathlib import Path
 
           config_path, version, requested_date = sys.argv[1:]
@@ -92,7 +92,7 @@ jobs:
               raise SystemExit("CITATION.cff não contém version.")
           if tuple(map(int, version.split("."))) <= tuple(map(int, current_match.group(1).split("."))):
               raise SystemExit("A nova versão deve ser maior que a versão atual.")
-          release_date = requested_date or date.today().isoformat()
+          release_date = requested_date or datetime.now(timezone.utc).date().isoformat()
           try:
               date.fromisoformat(release_date)
           except ValueError as error:
