@@ -78,7 +78,7 @@ def test_latex_build_accepts_pdf_named_after_entrypoint() -> None:
         fake_latexmk.write_text(
             """#!/usr/bin/env bash
 set -euo pipefail
-touch realanal.pdf
+printf 'fake pdf' > realanal.pdf
 """,
             encoding="utf-8",
         )
