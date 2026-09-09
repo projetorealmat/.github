@@ -67,6 +67,45 @@ esac
         assert (root / "aata.pdf").read_bytes() == b"fake pdf"
 
 
+
+def test_latex_build_accepts_pdf_named_after_entrypoint() -> None:
+    """A LaTeX build may already produce the configured PDF name."""
+    with TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        fake_bin = root / "bin"
+        fake_bin.mkdir()
+        fake_latexmk = fake_bin / "latexmk"
+        fake_latexmk.write_text(
+            """#!/usr/bin/env bash
+set -euo pipefail
+touch realanal.pdf
+""",
+            encoding="utf-8",
+        )
+        fake_latexmk.chmod(0o755)
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "BUILD_SYSTEM": "latex",
+                "PDF_NAME": "realanal.pdf",
+                "LATEX_ENTRYPOINT": "realanal.tex",
+                "LATEX_ENGINE": "pdflatex",
+                "PATH": f"{fake_bin}:{environment['PATH']}",
+            }
+        )
+        (root / "realanal.tex").write_text("% fake entrypoint\n", encoding="utf-8")
+        result = subprocess.run(
+            ["bash", str(BUILD_SCRIPT)],
+            cwd=root,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (root / "realanal.pdf").is_file()
+
+
 def test_shared_toolchain_is_complete() -> None:
     """The central workflow owns the complete LaTeX toolchain."""
     for workflow in WORKFLOWS:
@@ -93,6 +132,7 @@ def main() -> None:
         require(text, "PRETEXT_CACHED_ASSETS_DESTINATION:", workflow)
 
     test_pretext_build_accepts_document_named_pdf()
+    test_latex_build_accepts_pdf_named_after_entrypoint()
     test_shared_toolchain_is_complete()
 
 
