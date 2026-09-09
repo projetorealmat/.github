@@ -56,6 +56,73 @@ def assert_rejected(script: str, config: dict, expected: str, *arguments: str) -
     assert result.stderr.strip() == expected, result.stderr
 
 
+def workflow_call_input_default(workflow: str, input_name: str) -> str:
+    lines = workflow.splitlines()
+    try:
+        workflow_call = lines.index("  workflow_call:")
+        inputs = lines.index("    inputs:", workflow_call)
+    except ValueError as error:
+        raise AssertionError("workflow_call não declara inputs.") from error
+
+    input_header = f"      {input_name}:"
+    try:
+        start = lines.index(input_header, inputs)
+    except ValueError as error:
+        raise AssertionError(f"workflow_call não declara o input {input_name}.") from error
+
+    for line in lines[start + 1 :]:
+        if line.startswith("    ") and line.strip().endswith(":"):
+            break
+        if line.startswith("        default: "):
+            return line.removeprefix("        default: ").strip()
+    raise AssertionError(f"input {input_name} não declara default.")
+
+
+def assert_contains(workflow: str, expected: str, description: str) -> None:
+    assert expected in workflow, f"{description}: esperado {expected!r}"
+
+
+def assert_base_branch_contract(prepare: str, publish: str) -> None:
+    assert workflow_call_input_default(prepare, "base_branch") == "main"
+    assert workflow_call_input_default(publish, "base_branch") == "main"
+
+    expression = "${{ inputs.base_branch }}"
+    assert_contains(prepare, f"ref: {expression}", "prepare checkout usa base_branch")
+    assert_contains(prepare, f'--base "{expression}"', "prepare cria PR na base configurada")
+    assert_contains(publish, f"ref: {expression}", "publish faz checkout da base configurada")
+    assert_contains(publish, f"BASE_BRANCH: {expression}", "publish recebe base_branch")
+    assert_contains(
+        publish,
+        '[[ "${base_ref}" == "${BASE_BRANCH}" ]]',
+        "publish valida a base da Release PR",
+    )
+    assert_contains(
+        publish,
+        '"origin/${BASE_BRANCH}"',
+        "publish verifica ancestralidade na base configurada",
+    )
+
+
+def assert_contract_failure(prepare: str, publish: str) -> None:
+    try:
+        assert_base_branch_contract(prepare, publish)
+    except AssertionError:
+        return
+    raise AssertionError("A mutação deveria violar o contrato de base_branch.")
+
+
+def test_base_branch_contract() -> None:
+    prepare = (ROOT / ".github/workflows/book-prepare-release.yml").read_text(encoding="utf-8")
+    publish = (ROOT / ".github/workflows/book-publish-release.yml").read_text(encoding="utf-8")
+    expression = "${{ inputs.base_branch }}"
+
+    assert_base_branch_contract(prepare, publish)
+    assert_contract_failure(prepare.replace("default: main", "default: master", 1), publish)
+    assert_contract_failure(prepare.replace(f'--base "{expression}"', "--base main", 1), publish)
+    assert_contract_failure(prepare, publish.replace(f"ref: {expression}", "ref: main", 1))
+    assert_contract_failure(prepare, publish.replace(f"BASE_BRANCH: {expression}", "", 1))
+
+
 def test_actual_config_validators() -> None:
     prepare = embedded_validator("book-prepare-release.yml", "Validar configuração, versão e data")
     publish = embedded_validator("book-publish-release.yml", "Ler configuração do livro")
@@ -96,6 +163,7 @@ def test_actual_config_validators() -> None:
 
 
 if __name__ == "__main__":
+    test_base_branch_contract()
     test_actual_config_validators()
     print("book configuration contract tests passed")
 
