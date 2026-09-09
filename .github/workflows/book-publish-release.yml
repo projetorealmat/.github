@@ -4,12 +4,12 @@ on:
   workflow_call:
     inputs:
       config:
-        description: Caminho do arquivo JSON de configuração do livro
+        description: Arquivo de configuração do livro
         required: false
         type: string
         default: .realmat/book.json
       release_pr:
-        description: Número de uma Release PR já mesclada para recuperação manual
+        description: Número de uma Release PR já mesclada, para reexecução manual
         required: false
         type: string
         default: ""
@@ -18,7 +18,7 @@ on:
         required: true
 
 permissions:
-  contents: read
+  contents: write
   pull-requests: read
 
 concurrency:
@@ -30,213 +30,64 @@ jobs:
     name: Resolver Release PR
     runs-on: ubuntu-24.04
     outputs:
-      release_pr_number: ${{ steps.resolve.outputs.release_pr_number }}
+      release_pr: ${{ steps.resolve.outputs.release_pr }}
       release_commit: ${{ steps.resolve.outputs.release_commit }}
-      release_base_sha: ${{ steps.resolve.outputs.release_base_sha }}
-      release_branch: ${{ steps.resolve.outputs.release_branch }}
-      release_tag: ${{ steps.metadata.outputs.release_tag }}
-      release_version: ${{ steps.metadata.outputs.release_version }}
-      release_date: ${{ steps.metadata.outputs.release_date }}
-      release_status: ${{ steps.metadata.outputs.release_status }}
-      release_is_prerelease: ${{ steps.metadata.outputs.release_is_prerelease }}
-      pdf_name: ${{ steps.config.outputs.pdf_name }}
-      source_prefix: ${{ steps.config.outputs.source_prefix }}
-      tex_entrypoint: ${{ steps.config.outputs.tex_entrypoint }}
-      build_metadata_file: ${{ steps.config.outputs.build_metadata_file }}
-      validation_script: ${{ steps.config.outputs.validation_script }}
-      portal_repository: ${{ steps.config.outputs.portal_repository }}
-      portal_name: ${{ steps.config.outputs.portal_name }}
-      book_id: ${{ steps.config.outputs.book_id }}
-      book_title: ${{ steps.config.outputs.book_title }}
-      book_short_title: ${{ steps.config.outputs.book_short_title }}
-      book_subject: ${{ steps.config.outputs.book_subject }}
-      pdf_version_marker: ${{ steps.config.outputs.pdf_version_marker }}
-      pdf_status_marker: ${{ steps.config.outputs.pdf_status_marker }}
-
+      release_tag: ${{ steps.resolve.outputs.release_tag }}
+      base_branch: ${{ steps.resolve.outputs.base_branch }}
     steps:
-      - name: Checkout main
+      - name: Checkout da branch padrão
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: main
           fetch-depth: 0
 
-      - name: Resolver e validar a Release PR
+      - name: Validar Release PR
         id: resolve
         env:
           GH_TOKEN: ${{ github.token }}
+          CONFIG: ${{ inputs.config }}
           EVENT_NAME: ${{ github.event_name }}
-          EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
-          REQUESTED_PR_NUMBER: ${{ inputs.release_pr }}
+          EVENT_PR: ${{ github.event.pull_request.number }}
+          REQUESTED_PR: ${{ inputs.release_pr }}
+          REPOSITORY: ${{ github.repository }}
         shell: bash
         run: |
           set -euo pipefail
           if [[ "${EVENT_NAME}" == "pull_request" ]]; then
-            pr_number="${EVENT_PR_NUMBER}"
+            pr_number="${EVENT_PR}"
           else
-            pr_number="${REQUESTED_PR_NUMBER}"
+            pr_number="${REQUESTED_PR}"
           fi
-          if [[ ! "${pr_number}" =~ ^[0-9]+$ ]]; then
-            echo "O número da Release PR deve ser um inteiro positivo."
-            exit 1
-          fi
-
-          pr_json="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${pr_number}")"
+          [[ "${pr_number}" =~ ^[0-9]+$ ]] || { echo "Número da PR inválido."; exit 1; }
+          base_branch="$(python3 - "${CONFIG}" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+          config = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          print(config.get("base_branch", "main"))
+          PY
+          )"
+          pr_json="$(gh api "repos/${REPOSITORY}/pulls/${pr_number}")"
           merged="$(jq -r '.merged' <<< "${pr_json}")"
           base_ref="$(jq -r '.base.ref' <<< "${pr_json}")"
-          base_sha="$(jq -r '.base.sha' <<< "${pr_json}")"
           head_ref="$(jq -r '.head.ref' <<< "${pr_json}")"
           head_repo="$(jq -r '.head.repo.full_name // ""' <<< "${pr_json}")"
           merge_commit="$(jq -r '.merge_commit_sha // ""' <<< "${pr_json}")"
-
-          [[ "${merged}" == "true" ]] || { echo "A PR #${pr_number} não foi mesclada."; exit 1; }
-          [[ "${base_ref}" == "main" ]] || { echo "A Release PR deve ter main como base."; exit 1; }
-          [[ "${head_repo}" == "${GITHUB_REPOSITORY}" ]] || { echo "A Release PR deve ser interna."; exit 1; }
+          [[ "${merged}" == "true" ]] || { echo "A Release PR não foi mesclada."; exit 1; }
+          [[ "${base_ref}" == "${base_branch}" ]] || { echo "A base da PR não coincide com a configuração."; exit 1; }
+          [[ "${head_repo}" == "${REPOSITORY}" ]] || { echo "A Release PR deve ser interna."; exit 1; }
           [[ "${head_ref}" =~ ^release/v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Branch de release inválida."; exit 1; }
           [[ "${merge_commit}" =~ ^[0-9a-f]{40}$ ]] || { echo "Commit mesclado inválido."; exit 1; }
-          [[ "${base_sha}" =~ ^[0-9a-f]{40}$ ]] || { echo "Commit-base inválido."; exit 1; }
-
-          git fetch --no-tags origin main
-          git merge-base --is-ancestor "${merge_commit}" origin/main || {
-            echo "O commit da Release PR deve estar contido em main."
+          git fetch --no-tags origin "${base_branch}"
+          git merge-base --is-ancestor "${merge_commit}" "origin/${base_branch}" || {
+            echo "O commit da Release PR não está na branch base."
             exit 1
           }
-
           {
-            echo "release_pr_number=${pr_number}"
+            echo "release_pr=${pr_number}"
             echo "release_commit=${merge_commit}"
-            echo "release_base_sha=${base_sha}"
-            echo "release_branch=${head_ref}"
+            echo "release_tag=${head_ref#release/}"
+            echo "base_branch=${base_branch}"
           } >> "${GITHUB_OUTPUT}"
-
-      - name: Checkout do commit da release
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ steps.resolve.outputs.release_commit }}
-          fetch-depth: 0
-
-      - name: Ler configuração do livro
-        id: config
-        env:
-          CONFIG: ${{ inputs.config }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - "${CONFIG}" <<'PY'
-          import json
-          import os
-          import re
-          import sys
-          from pathlib import Path
-
-          config = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-          required = (
-              "id", "title", "short_title", "subject", "pdf_name",
-              "source_prefix", "tex_entrypoint", "build_metadata_file",
-              "portal_repository", "pdf_version_marker", "pdf_status_marker",
-          )
-          missing = [key for key in required if not config.get(key)]
-          if missing:
-              raise SystemExit(f"Configuração do livro incompleta: {', '.join(missing)}")
-          if not re.fullmatch(r"[^/\s]+/[^/\s]+", config["portal_repository"]):
-              raise SystemExit("portal_repository inválido.")
-          portal_name = config["portal_repository"].split("/", 1)[1]
-          validation_script = config.get("validation_script", "")
-          output = open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8")
-          with output:
-              values = {
-                  "book_id": config["id"],
-                  "pdf_name": config["pdf_name"],
-                  "source_prefix": config["source_prefix"],
-                  "tex_entrypoint": config["tex_entrypoint"],
-                  "build_metadata_file": config["build_metadata_file"],
-                  "validation_script": validation_script,
-                  "portal_repository": config["portal_repository"],
-                  "portal_name": portal_name,
-                  "book_title": config["title"],
-                  "book_short_title": config["short_title"],
-                  "book_subject": config["subject"],
-                  "pdf_version_marker": config["pdf_version_marker"],
-                  "pdf_status_marker": config["pdf_status_marker"],
-              }
-              for key, value in values.items():
-                  output.write(f"{key}={value}\n")
-          PY
-
-      - name: Validar metadados e imutabilidade
-        id: metadata
-        env:
-          RELEASE_COMMIT: ${{ steps.resolve.outputs.release_commit }}
-          RELEASE_BASE_SHA: ${{ steps.resolve.outputs.release_base_sha }}
-          RELEASE_BRANCH: ${{ steps.resolve.outputs.release_branch }}
-          CONFIG: ${{ inputs.config }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 - "${CONFIG}" "${RELEASE_BASE_SHA}" "${RELEASE_COMMIT}" "${RELEASE_BRANCH}" <<'PY'
-          import json
-          import os
-          import re
-          import subprocess
-          import sys
-          from datetime import date
-          from pathlib import Path
-
-          config_path, base_sha, release_commit, release_branch = sys.argv[1:]
-          config = json.loads(Path(config_path).read_text(encoding="utf-8"))
-          citation_path = Path(config.get("citation_file", "CITATION.cff"))
-          text = citation_path.read_text(encoding="utf-8")
-
-          def field(name: str) -> str:
-              match = re.search(
-                  rf"^{re.escape(name)}:\s*[\"']?([^\s\"']+)[\"']?\s*$",
-                  text,
-                  re.MULTILINE,
-              )
-              if match is None:
-                  raise SystemExit(f"CITATION.cff não contém {name} válido.")
-              return match.group(1)
-
-          version = field("version")
-          release_date = field("date-released")
-          if not re.fullmatch(r"\d+\.\d+\.\d+", version):
-              raise SystemExit("version inválida.")
-          try:
-              date.fromisoformat(release_date)
-          except ValueError as error:
-              raise SystemExit("date-released inválida.") from error
-          tag = f"v{version}"
-          if release_branch != f"release/{tag}":
-              raise SystemExit("A branch da Release PR não coincide com a versão.")
-
-          previous = subprocess.check_output(
-              ["git", "show", f"{base_sha}:{citation_path}"], text=True
-          )
-          previous_match = re.search(
-              r"^version:\s*[\"']?([0-9]+\.[0-9]+\.[0-9]+)[\"']?\s*$",
-              previous,
-              re.MULTILINE,
-          )
-          if previous_match is None or previous_match.group(1) == version:
-              raise SystemExit("A Release PR deve aumentar a versão do CITATION.cff.")
-
-          major, minor, patch = (int(part) for part in version.split("."))
-          if major == 0:
-              status, prerelease = "em revisão", "true"
-          elif (major, minor, patch) == (1, 0, 0):
-              status, prerelease = "tradução aprovada", "false"
-          elif major == 1:
-              status, prerelease = "versão revisada", "false"
-          else:
-              status, prerelease = "nova versão", "false"
-
-          output = open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8")
-          with output:
-              output.write(f"release_tag={tag}\n")
-              output.write(f"release_version={version}\n")
-              output.write(f"release_date={release_date}\n")
-              output.write(f"release_status={status}\n")
-              output.write(f"release_is_prerelease={prerelease}\n")
-          PY
 
   build:
     name: Compilar e publicar release
@@ -246,26 +97,16 @@ jobs:
       contents: write
       pull-requests: read
     outputs:
-      pdf_sha256: ${{ steps.digest.outputs.pdf_sha256 }}
-
-    env:
-      RELEASE_PR_NUMBER: ${{ needs.resolve.outputs.release_pr_number }}
-      RELEASE_COMMIT: ${{ needs.resolve.outputs.release_commit }}
-      RELEASE_BASE_SHA: ${{ needs.resolve.outputs.release_base_sha }}
-      RELEASE_BRANCH: ${{ needs.resolve.outputs.release_branch }}
-      RELEASE_TAG: ${{ needs.resolve.outputs.release_tag }}
-      RELEASE_VERSION: ${{ needs.resolve.outputs.release_version }}
-      RELEASE_DATE: ${{ needs.resolve.outputs.release_date }}
-      RELEASE_STATUS: ${{ needs.resolve.outputs.release_status }}
-      RELEASE_IS_PRERELEASE: ${{ needs.resolve.outputs.release_is_prerelease }}
-      PDF_NAME: ${{ needs.resolve.outputs.pdf_name }}
-      SOURCE_PREFIX: ${{ needs.resolve.outputs.source_prefix }}
-      TEX_ENTRYPOINT: ${{ needs.resolve.outputs.tex_entrypoint }}
-      BUILD_METADATA_FILE: ${{ needs.resolve.outputs.build_metadata_file }}
-      VALIDATION_SCRIPT: ${{ needs.resolve.outputs.validation_script }}
-      PDF_VERSION_MARKER: ${{ needs.resolve.outputs.pdf_version_marker }}
-      PDF_STATUS_MARKER: ${{ needs.resolve.outputs.pdf_status_marker }}
-
+      pdf_sha256: ${{ steps.package.outputs.pdf_sha256 }}
+      release_date: ${{ steps.metadata.outputs.release_date }}
+      release_status: ${{ steps.metadata.outputs.release_status }}
+      pdf_name: ${{ steps.config.outputs.pdf_name }}
+      portal_repository: ${{ steps.config.outputs.portal_repository }}
+      portal_name: ${{ steps.config.outputs.portal_name }}
+      book_id: ${{ steps.config.outputs.book_id }}
+      book_title: ${{ steps.config.outputs.book_title }}
+      book_short_title: ${{ steps.config.outputs.book_short_title }}
+      book_subject: ${{ steps.config.outputs.book_subject }}
     steps:
       - name: Checkout do commit da release
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -273,27 +114,97 @@ jobs:
           ref: ${{ needs.resolve.outputs.release_commit }}
           fetch-depth: 0
 
-      - name: Criar metadados de compilação
+      - name: Checkout dos scripts REALMat
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .realmat-central
+
+      - name: Ler configuração
+        id: config
+        env:
+          CONFIG: ${{ inputs.config }}
+          PORTAL_DEFAULT: projetorealmat/projetorealmat.github.io
         shell: bash
         run: |
           set -euo pipefail
-          release_date_display="$(date -u -d "${RELEASE_DATE}" +%d/%m/%Y)"
-          {
-            printf '\\renewcommand*{\\editionversion}{%s}\n' "${RELEASE_TAG}"
-            printf '\\renewcommand*{\\editiondate}{%s}\n' "${release_date_display}"
-            printf '\\renewcommand*{\\editionstatus}{%s}\n' "${RELEASE_STATUS}"
-          } > "${BUILD_METADATA_FILE}"
+          python3 - "${CONFIG}" <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
 
-      - name: Validar alterações e marcadores editoriais
+          config = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          portal = config.get("portal_repository", os.environ["PORTAL_DEFAULT"])
+          owner, name = portal.split("/", 1)
+          values = {
+              "build_system": config["build_system"],
+              "pdf_name": config["pdf_name"],
+              "pretext_project_file": config.get("pretext_project_file", ""),
+              "pretext_pdf_target": config.get("pretext_pdf_target", ""),
+              "pretext_web_target": config.get("pretext_web_target", ""),
+              "pretext_requirements_file": config.get("pretext_requirements_file", "requirements.txt"),
+              "latex_entrypoint": config.get("latex_entrypoint", ""),
+              "latex_engine": config.get("latex_engine", "xelatex"),
+              "portal_repository": portal,
+              "portal_name": name,
+              "book_id": config["id"],
+              "book_title": config["title"],
+              "book_short_title": config["short_title"],
+              "book_subject": config["subject"],
+          }
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              for key, value in values.items():
+                  output.write(f"{key}={value}\n")
+          PY
+
+      - name: Ler versão e status editorial
+        id: metadata
+        env:
+          RELEASE_TAG: ${{ needs.resolve.outputs.release_tag }}
+          CITATION_FILE: ${{ inputs.config }}
         shell: bash
         run: |
           set -euo pipefail
-          git diff --check "${RELEASE_BASE_SHA}" "${RELEASE_COMMIT}"
-          if [[ -n "${VALIDATION_SCRIPT}" ]]; then
-            python3 "${VALIDATION_SCRIPT}" .
-          fi
+          python3 - "${CITATION_FILE}" "${RELEASE_TAG}" <<'PY'
+          import json
+          import os
+          import re
+          import sys
+          from datetime import date
+          from pathlib import Path
 
-      - name: Instalar XeLaTeX e ferramentas do PDF
+          config = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+          tag = sys.argv[2]
+          citation = Path(config.get("citation_file", "CITATION.cff")).read_text(encoding="utf-8")
+          version = re.search(r"^version:\s*[\"']?(\d+\.\d+\.\d+)[\"']?\s*$", citation, re.MULTILINE)
+          released = re.search(r"^date-released:\s*(\d{4}-\d{2}-\d{2})\s*$", citation, re.MULTILINE)
+          if version is None or released is None or f"v{version.group(1)}" != tag:
+              raise SystemExit("CITATION.cff não coincide com a tag da Release PR.")
+          major, minor, patch = map(int, version.group(1).split("."))
+          status = (
+              "em revisão" if major == 0 else
+              "tradução aprovada" if (major, minor, patch) == (1, 0, 0) else
+              "versão revisada" if major == 1 else
+              "nova versão"
+          )
+          date.fromisoformat(released.group(1))
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"release_date={released.group(1)}\n")
+              output.write(f"release_status={status}\n")
+          PY
+
+      - name: Configurar Python
+        if: steps.config.outputs.build_system == 'pretext'
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependências de compilação
+        env:
+          BUILD_SYSTEM: ${{ steps.config.outputs.build_system }}
+          PRETEXT_REQUIREMENTS_FILE: ${{ steps.config.outputs.pretext_requirements_file }}
         shell: bash
         run: |
           set -euo pipefail
@@ -308,63 +219,64 @@ jobs:
             texlive-lang-portuguese \
             texlive-xetex \
             latexmk \
-            poppler-utils
+            poppler-utils \
+            pdf2svg \
+            nodejs \
+            npm
+          if [[ "${BUILD_SYSTEM}" == "pretext" ]]; then
+            python -m pip install --requirement "${PRETEXT_REQUIREMENTS_FILE}"
+          fi
 
-      - name: Registrar ambiente de compilação
+      - name: Compilar PDF
+        env:
+          BUILD_SYSTEM: ${{ steps.config.outputs.build_system }}
+          PDF_NAME: ${{ steps.config.outputs.pdf_name }}
+          PRETEXT_PROJECT_FILE: ${{ steps.config.outputs.pretext_project_file }}
+          PRETEXT_PDF_TARGET: ${{ steps.config.outputs.pretext_pdf_target }}
+          PRETEXT_WEB_TARGET: ${{ steps.config.outputs.pretext_web_target }}
+          LATEX_ENTRYPOINT: ${{ steps.config.outputs.latex_entrypoint }}
+          LATEX_ENGINE: ${{ steps.config.outputs.latex_engine }}
         shell: bash
-        run: |
-          set -euo pipefail
-          {
-            printf 'Runner: ubuntu-24.04\n'
-            printf 'XeLaTeX: '; xelatex --version | head -n1
-            printf 'latexmk: '; latexmk --version | head -n1
-            printf 'TeX engine: '; kpsewhich --version | head -n1
-          } > build-environment.txt
+        run: bash .realmat-central/scripts/build-book.sh
 
-      - name: Compilar PDF final
-        shell: bash
-        run: latexmk -xelatex -interaction=nonstopmode -halt-on-error -file-line-error "${TEX_ENTRYPOINT}"
-
-      - name: Verificar marcadores do PDF
-        shell: bash
-        run: |
-          set -euo pipefail
-          pdftotext -layout "${PDF_NAME}" release-pdf-text.txt
-          grep -Fq "${PDF_VERSION_MARKER}${RELEASE_TAG}" release-pdf-text.txt
-          grep -Fq "${PDF_STATUS_MARKER}${RELEASE_STATUS}" release-pdf-text.txt
-
-      - name: Empacotar fontes e checksums
-        id: digest
+      - name: Empacotar fontes e checksum
+        id: package
+        env:
+          PDF_NAME: ${{ steps.config.outputs.pdf_name }}
+          SOURCE_PREFIX: ${{ steps.config.outputs.book_id }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.release_tag }}
+          RELEASE_COMMIT: ${{ needs.resolve.outputs.release_commit }}
+          RELEASE_DATE: ${{ steps.metadata.outputs.release_date }}
+          RELEASE_STATUS: ${{ steps.metadata.outputs.release_status }}
+          RELEASE_PR: ${{ needs.resolve.outputs.release_pr }}
         shell: bash
         run: |
           set -euo pipefail
           metadata_file="${SOURCE_PREFIX}-${RELEASE_TAG}-metadata.txt"
           source_dir="${SOURCE_PREFIX}-${RELEASE_TAG}-source"
           source_asset="${source_dir}.tar.gz"
-          release_date_display="$(date -u -d "${RELEASE_DATE}" +%d/%m/%Y)"
           {
             printf 'Livro: %s\n' "${GITHUB_REPOSITORY}"
             printf 'Versão: %s\n' "${RELEASE_TAG}"
-            printf 'Data de publicação: %s\n' "${release_date_display}"
+            printf 'Data de publicação: %s\n' "${RELEASE_DATE}"
             printf 'Status editorial: %s\n' "${RELEASE_STATUS}"
             printf 'Commit: %s\n' "${RELEASE_COMMIT}"
-            printf 'Release PR: #%s\n' "${RELEASE_PR_NUMBER}"
-            printf 'Repositório: https://github.com/%s\n' "${GITHUB_REPOSITORY}"
+            printf 'Release PR: #%s\n' "${RELEASE_PR}"
           } > "${metadata_file}"
           git archive --format=tar --prefix="${source_dir}/" "${RELEASE_COMMIT}" | tar -x
-          cp "${BUILD_METADATA_FILE}" "${source_dir}/"
           cp "${metadata_file}" "${source_dir}/"
-          cp build-environment.txt "${source_dir}/"
           tar -czf "${source_asset}" "${source_dir}"
-          sha256sum "${PDF_NAME}" "${source_asset}" "${metadata_file}" build-environment.txt > SHA256SUMS
+          sha256sum "${PDF_NAME}" "${source_asset}" "${metadata_file}" > SHA256SUMS
           pdf_sha256="$(sha256sum "${PDF_NAME}" | awk '{print $1}')"
           echo "pdf_sha256=${pdf_sha256}" >> "${GITHUB_OUTPUT}"
-          echo "RELEASE_METADATA=${metadata_file}" >> "${GITHUB_ENV}"
+          echo "METADATA_FILE=${metadata_file}" >> "${GITHUB_ENV}"
           echo "SOURCE_ASSET=${source_asset}" >> "${GITHUB_ENV}"
 
       - name: Criar ou validar tag imutável
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.release_tag }}
+          RELEASE_COMMIT: ${{ needs.resolve.outputs.release_commit }}
         shell: bash
         run: |
           set -euo pipefail
@@ -372,49 +284,82 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           if git ls-remote --exit-code --refs origin "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
             git fetch origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
-            [[ "$(git rev-parse "${RELEASE_TAG}^{commit}")" == "${RELEASE_COMMIT}" ]] || {
-              echo "A tag ${RELEASE_TAG} aponta para outro commit."
+            [[ "$(git rev-list -n 1 "${RELEASE_TAG}^{commit}")" == "${RELEASE_COMMIT}" ]] || {
+              echo "A tag ${RELEASE_TAG} já existe e aponta para outro commit."
               exit 1
             }
           else
-            git tag -a "${RELEASE_TAG}" "${RELEASE_COMMIT}" -m "${SOURCE_PREFIX} ${RELEASE_TAG}"
+            git tag -a "${RELEASE_TAG}" "${RELEASE_COMMIT}" -m "${GITHUB_REPOSITORY##*/} ${RELEASE_TAG}"
             git push origin "refs/tags/${RELEASE_TAG}"
           fi
 
-      - name: Criar ou completar GitHub Release
+      - name: Criar GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.release_tag }}
+          RELEASE_COMMIT: ${{ needs.resolve.outputs.release_commit }}
+          RELEASE_STATUS: ${{ steps.metadata.outputs.release_status }}
+          PDF_NAME: ${{ steps.config.outputs.pdf_name }}
         shell: bash
         run: |
           set -euo pipefail
-          assets=("${PDF_NAME}" "${SOURCE_ASSET}" "${RELEASE_METADATA}" build-environment.txt SHA256SUMS)
+          flags=()
+          [[ "${RELEASE_STATUS}" == "em revisão" ]] && flags+=(--prerelease)
+          assets=("${PDF_NAME}" "${SOURCE_ASSET}" "${METADATA_FILE}" SHA256SUMS)
           if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            is_draft="$(gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --json isDraft --jq '.isDraft')"
-            if [[ "${is_draft}" == "true" ]]; then
-              gh release upload "${RELEASE_TAG}" "${assets[@]}" --repo "${GITHUB_REPOSITORY}" --clobber
-            else
-              echo "A release publicada não será modificada."
+            release_json="$(gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --json tagName,isDraft,isPrerelease)"
+            [[ "$(jq -r '.tagName' <<< "${release_json}")" == "${RELEASE_TAG}" ]] || {
+              echo "A Release existente não corresponde à tag esperada."
+              exit 1
+            }
+            expected_prerelease=false
+            [[ "${RELEASE_STATUS}" == "em revisão" ]] && expected_prerelease=true
+            actual_prerelease="$(jq -r '.isPrerelease' <<< "${release_json}")"
+            [[ "$(jq -r '.isDraft' <<< "${release_json}")" == "true" || "${actual_prerelease}" == "${expected_prerelease}" ]] || {
+              echo "A Release existente tem status incompatível."
+              exit 1
+            }
+            gh release upload "${RELEASE_TAG}" "${assets[@]}" --repo "${GITHUB_REPOSITORY}" --clobber
+            if [[ "$(jq -r '.isDraft' <<< "${release_json}")" == "true" ]]; then
+              if [[ "${RELEASE_STATUS}" == "em revisão" ]]; then
+                gh release edit "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --draft=false --prerelease
+              else
+                gh release edit "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --draft=false --prerelease=false
+              fi
             fi
           else
-            flags=(--draft)
-            [[ "${RELEASE_IS_PRERELEASE}" == "true" ]] && flags+=(--prerelease)
             gh release create "${RELEASE_TAG}" \
               --repo "${GITHUB_REPOSITORY}" \
               --target "${RELEASE_COMMIT}" \
-              --title "${SOURCE_PREFIX} ${RELEASE_TAG} — ${RELEASE_STATUS}" \
+              --title "${GITHUB_REPOSITORY##*/} ${RELEASE_TAG}" \
               --generate-notes "${flags[@]}"
             gh release upload "${RELEASE_TAG}" "${assets[@]}" --repo "${GITHUB_REPOSITORY}"
           fi
-          if [[ "$(gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --json isDraft --jq '.isDraft')" == "true" ]]; then
-            if [[ "${RELEASE_IS_PRERELEASE}" == "true" ]]; then
-              gh release edit "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --draft=false --prerelease
-            else
-              gh release edit "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --draft=false --prerelease=false
-            fi
-          fi
+
+      - name: Verificar PDF publicado
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.release_tag }}
+          PDF_NAME: ${{ steps.config.outputs.pdf_name }}
+          EXPECTED_SHA256: ${{ steps.package.outputs.pdf_sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          published_dir="${RUNNER_TEMP}/published-release"
+          mkdir -p "${published_dir}"
+          gh release download "${RELEASE_TAG}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --pattern "${PDF_NAME}" \
+            --dir "${published_dir}" \
+            --clobber
+          actual_sha256="$(sha256sum "${published_dir}/${PDF_NAME}" | awk '{print $1}')"
+          [[ "${actual_sha256}" == "${EXPECTED_SHA256}" ]] || {
+            echo "O SHA-256 do PDF publicado diverge do build final."
+            exit 1
+          }
 
   dispatch:
-    name: Propor atualização do catálogo
+    name: Enviar release ao catálogo
     needs: [resolve, build]
     runs-on: ubuntu-24.04
     permissions:
@@ -427,38 +372,23 @@ jobs:
           app-id: ${{ vars.REALMAT_AUTOMATION_APP_ID }}
           private-key: ${{ secrets.REALMAT_AUTOMATION_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
-          repositories: ${{ needs.resolve.outputs.portal_name }}
+          repositories: ${{ needs.build.outputs.portal_name }}
 
-      - name: Baixar o PDF publicado e montar payload
-        id: payload
+      - name: Montar payload do catálogo
         env:
-          GH_TOKEN: ${{ github.token }}
+          PDF_NAME: ${{ needs.build.outputs.pdf_name }}
+          PDF_SHA256: ${{ needs.build.outputs.pdf_sha256 }}
           RELEASE_TAG: ${{ needs.resolve.outputs.release_tag }}
-          PDF_NAME: ${{ needs.resolve.outputs.pdf_name }}
-          EXPECTED_SHA256: ${{ needs.build.outputs.pdf_sha256 }}
-          RELEASE_STATUS: ${{ needs.resolve.outputs.release_status }}
-          RELEASE_DATE: ${{ needs.resolve.outputs.release_date }}
-          PORTAL_REPOSITORY: ${{ needs.resolve.outputs.portal_repository }}
-          BOOK_TITLE: ${{ needs.resolve.outputs.book_title }}
-          BOOK_SHORT_TITLE: ${{ needs.resolve.outputs.book_short_title }}
-          BOOK_SUBJECT: ${{ needs.resolve.outputs.book_subject }}
-          BOOK_ID: ${{ needs.resolve.outputs.book_id }}
-          RUNNER_TEMP: ${{ runner.temp }}
+          RELEASE_DATE: ${{ needs.build.outputs.release_date }}
+          RELEASE_STATUS: ${{ needs.build.outputs.release_status }}
+          BOOK_ID: ${{ needs.build.outputs.book_id }}
+          BOOK_TITLE: ${{ needs.build.outputs.book_title }}
+          BOOK_SHORT_TITLE: ${{ needs.build.outputs.book_short_title }}
+          BOOK_SUBJECT: ${{ needs.build.outputs.book_subject }}
+          PORTAL_REPOSITORY: ${{ needs.build.outputs.portal_repository }}
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "${RUNNER_TEMP}/release-asset"
-          gh release download "${RELEASE_TAG}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --pattern "${PDF_NAME}" \
-            --dir "${RUNNER_TEMP}/release-asset" \
-            --clobber
-          pdf_path="${RUNNER_TEMP}/release-asset/${PDF_NAME}"
-          actual_sha256="$(sha256sum "${pdf_path}" | awk '{print $1}')"
-          [[ "${actual_sha256}" == "${EXPECTED_SHA256}" ]] || {
-            echo "O SHA-256 do PDF publicado diverge do build final."
-            exit 1
-          }
           python3 - <<'PY'
           import json
           import os
@@ -478,19 +408,15 @@ jobs:
               "release_url": f"https://github.com/{repository}/releases/tag/{tag}",
               "pdf_url": f"https://github.com/{repository}/releases/download/{tag}/{os.environ['PDF_NAME']}",
               "pdf_path": f"/assets/books/{os.environ['BOOK_ID']}/{tag}/{os.environ['PDF_NAME']}",
-              "sha256": os.environ["EXPECTED_SHA256"],
+              "sha256": os.environ["PDF_SHA256"],
               "release_date": os.environ["RELEASE_DATE"],
           }
-          Path(os.environ["RUNNER_TEMP"]).joinpath("catalog-dispatch.json").write_text(
-              json.dumps({"event_type": "book-release", "client_payload": {"book": book}}, ensure_ascii=False),
-              encoding="utf-8",
-          )
+          payload = {"event_type": "book-release", "client_payload": {"book": book}}
+          Path("catalog-dispatch.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
           PY
 
       - name: Enviar evento ao portal
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          PORTAL_REPOSITORY: ${{ needs.resolve.outputs.portal_repository }}
-        run: |
-          set -euo pipefail
-          gh api --method POST "repos/${PORTAL_REPOSITORY}/dispatches" --input "${RUNNER_TEMP}/catalog-dispatch.json"
+          PORTAL_REPOSITORY: ${{ needs.build.outputs.portal_repository }}
+        run: gh api --method POST "repos/${PORTAL_REPOSITORY}/dispatches" --input catalog-dispatch.json
