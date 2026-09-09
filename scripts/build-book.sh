@@ -26,8 +26,8 @@ elif [[ "${BUILD_SYSTEM}" == "latex" ]]; then
     *) echo "latex_engine inválido: ${engine}"; exit 1 ;;
   esac
   base="${LATEX_ENTRYPOINT%.tex}"
-  if [[ -f "${base}.idx" ]]; then makeindex "${base}" || true; fi
-  if [[ -f "${base}.glo" ]]; then makeglossaries "${base}" || true; fi
+  if [[ -f "${base}.idx" ]]; then makeindex "${base}"; fi
+  if [[ -f "${base}.glo" ]]; then makeglossaries "${base}"; fi
   case "${engine}" in
     pdflatex) latexmk -pdf -interaction=nonstopmode -halt-on-error -file-line-error "${LATEX_ENTRYPOINT}" ;;
     xelatex) latexmk -xelatex -interaction=nonstopmode -halt-on-error -file-line-error "${LATEX_ENTRYPOINT}" ;;
