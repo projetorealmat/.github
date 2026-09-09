@@ -305,11 +305,58 @@ jobs:
           set -euo pipefail
           flags=()
           [[ "${RELEASE_STATUS}" == "em revisão" ]] && flags+=(--prerelease)
-          gh release create "${RELEASE_TAG}" "${PDF_NAME}" "${SOURCE_ASSET}" "${METADATA_FILE}" SHA256SUMS \
+          assets=("${PDF_NAME}" "${SOURCE_ASSET}" "${METADATA_FILE}" SHA256SUMS)
+          if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            release_json="$(gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --json tagName,isDraft,isPrerelease)"
+            [[ "$(jq -r '.tagName' <<< "${release_json}")" == "${RELEASE_TAG}" ]] || {
+              echo "A Release existente não corresponde à tag esperada."
+              exit 1
+            }
+            expected_prerelease=false
+            [[ "${RELEASE_STATUS}" == "em revisão" ]] && expected_prerelease=true
+            actual_prerelease="$(jq -r '.isPrerelease' <<< "${release_json}")"
+            [[ "$(jq -r '.isDraft' <<< "${release_json}")" == "true" || "${actual_prerelease}" == "${expected_prerelease}" ]] || {
+              echo "A Release existente tem status incompatível."
+              exit 1
+            }
+            gh release upload "${RELEASE_TAG}" "${assets[@]}" --repo "${GITHUB_REPOSITORY}" --clobber
+            if [[ "$(jq -r '.isDraft' <<< "${release_json}")" == "true" ]]; then
+              if [[ "${RELEASE_STATUS}" == "em revisão" ]]; then
+                gh release edit "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --draft=false --prerelease
+              else
+                gh release edit "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --draft=false --prerelease=false
+              fi
+            fi
+          else
+            gh release create "${RELEASE_TAG}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --target "${RELEASE_COMMIT}" \
+              --title "${GITHUB_REPOSITORY##*/} ${RELEASE_TAG}" \
+              --generate-notes "${flags[@]}"
+            gh release upload "${RELEASE_TAG}" "${assets[@]}" --repo "${GITHUB_REPOSITORY}"
+          fi
+
+      - name: Verificar PDF publicado
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.release_tag }}
+          PDF_NAME: ${{ steps.config.outputs.pdf_name }}
+          EXPECTED_SHA256: ${{ steps.package.outputs.pdf_sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          published_dir="${RUNNER_TEMP}/published-release"
+          mkdir -p "${published_dir}"
+          gh release download "${RELEASE_TAG}" \
             --repo "${GITHUB_REPOSITORY}" \
-            --target "${RELEASE_COMMIT}" \
-            --title "${GITHUB_REPOSITORY##*/} ${RELEASE_TAG}" \
-            --generate-notes "${flags[@]}"
+            --pattern "${PDF_NAME}" \
+            --dir "${published_dir}" \
+            --clobber
+          actual_sha256="$(sha256sum "${published_dir}/${PDF_NAME}" | awk '{print $1}')"
+          [[ "${actual_sha256}" == "${EXPECTED_SHA256}" ]] || {
+            echo "O SHA-256 do PDF publicado diverge do build final."
+            exit 1
+          }
 
   dispatch:
     name: Enviar release ao catálogo
