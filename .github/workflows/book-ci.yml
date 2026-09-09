@@ -111,6 +111,7 @@ jobs:
             texlive-fonts-recommended \
             texlive-fonts-extra \
             texlive-bibtex-extra \
+            texlive-games \
             texlive-lang-english \
             texlive-lang-portuguese \
             texlive-xetex \

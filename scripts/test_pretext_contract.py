@@ -67,11 +67,12 @@ esac
         assert (root / "aata.pdf").read_bytes() == b"fake pdf"
 
 
-def test_latex_workflows_install_amsrefs_dependency() -> None:
-    """LaTeX books using amsrefs must work with the shared toolchain."""
+def test_latex_workflows_install_common_extra_dependencies() -> None:
+    """LaTeX books using common packages must work with the shared toolchain."""
     for workflow in WORKFLOWS:
         text = workflow.read_text(encoding="utf-8")
         require(text, "texlive-bibtex-extra", workflow)
+        require(text, "texlive-games", workflow)
 
 
 def main() -> None:
@@ -93,7 +94,7 @@ def main() -> None:
         require(text, "PRETEXT_CACHED_ASSETS_DESTINATION:", workflow)
 
     test_pretext_build_accepts_document_named_pdf()
-    test_latex_workflows_install_amsrefs_dependency()
+    test_latex_workflows_install_common_extra_dependencies()
 
 
 if __name__ == "__main__":
