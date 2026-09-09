@@ -199,14 +199,21 @@ jobs:
               count=1,
               flags=re.MULTILINE,
           )
-          citation, date_count = re.subn(
-              r"^date-released:\s*.*$",
-              f"date-released: {release_date}",
-              citation,
-              count=1,
-              flags=re.MULTILINE,
-          )
-          if version_count != 1 or date_count != 1:
+          date_pattern = r"^date-released:\s*.*$"
+          date_count = len(re.findall(date_pattern, citation, re.MULTILINE))
+          if date_count == 0:
+              citation = citation.rstrip("\n") + f"\ndate-released: {release_date}\n"
+          elif date_count == 1:
+              citation = re.sub(
+                  date_pattern,
+                  f"date-released: {release_date}",
+                  citation,
+                  count=1,
+                  flags=re.MULTILINE,
+              )
+          else:
+              raise SystemExit("CITATION.cff contém mais de uma linha date-released.")
+          if version_count != 1:
               raise SystemExit("Não foi possível atualizar CITATION.cff de forma inequívoca.")
           citation_path.write_text(citation, encoding="utf-8")
 
