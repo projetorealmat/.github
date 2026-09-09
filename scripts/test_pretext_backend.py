@@ -62,6 +62,12 @@ def test_rejects_ambiguous_pdf_output() -> None:
     assert "Esperado exatamente um PDF" in result.stderr
 
 
+def test_rejects_missing_pdf_output() -> None:
+    result = run_validator(0)
+    assert result.returncode != 0
+    assert "Esperado exatamente um PDF" in result.stderr
+
+
 def test_rejects_missing_version_marker() -> None:
     result = run_validator(1, version_text="Versão: v0.1.0")
     assert result.returncode != 0
@@ -90,11 +96,18 @@ def test_publisher_waits_for_pretext_build_before_releasing() -> None:
     assert 'if: needs.resolve.outputs.build_system == \'pretext\'' in workflow
     assert "actions/download-artifact@" in workflow
     assert "pretext-release-pdf" in workflow
+    assert 'release_pdf="pretext-release-assets/${PDF_NAME}"' in workflow
+    assert 'sha256sum "${release_pdf}"' in workflow
+    assert 'printf \'%s  %s\\n\' "${pdf_checksum}" "${PDF_NAME}" > SHA256SUMS' in workflow
+    assert "Verificar PDF publicado contra artefato PreTeXt validado" in workflow
+    assert "O PDF publicado diverge do artefato PreTeXt validado." in workflow
+    assert "pretext_requirements_file: ${{ needs.resolve.outputs.pretext_requirements_file }}" in workflow
 
 
 if __name__ == "__main__":
     test_accepts_one_pdf_and_normalizes_its_name()
     test_rejects_ambiguous_pdf_output()
+    test_rejects_missing_pdf_output()
     test_rejects_missing_version_marker()
     test_reusable_workflow_keeps_pretext_outputs_deterministic()
     test_publisher_waits_for_pretext_build_before_releasing()

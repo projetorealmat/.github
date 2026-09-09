@@ -92,6 +92,38 @@ jobs:
           missing = [key for key in required if not config.get(key)]
           if missing:
               raise SystemExit(f"Configuração do livro incompleta: {', '.join(missing)}")
+
+          def safe_relative_path(key: str, value: object) -> None:
+              if not isinstance(value, str) or not value or "\\" in value:
+                  raise SystemExit(f"{key} deve ser um caminho relativo e seguro.")
+              path = Path(value)
+              if path.is_absolute() or ".." in path.parts or value.endswith("/"):
+                  raise SystemExit(f"{key} deve ser um caminho relativo e seguro.")
+
+          pdf_name = config["pdf_name"]
+          if (
+              not isinstance(pdf_name, str)
+              or not pdf_name
+              or "/" in pdf_name
+              or "\\" in pdf_name
+              or pdf_name in {".", ".."}
+          ):
+              raise SystemExit("pdf_name deve ser um nome de arquivo simples e seguro.")
+          if build_system == "pretext":
+              if "pretext_checksum_file" in config and not isinstance(config["pretext_checksum_file"], str):
+                  raise SystemExit("pretext_checksum_file deve ser uma string quando informado.")
+              safe_relative_path("pretext_project_file", config["pretext_project_file"])
+              safe_relative_path(
+                  "pretext_requirements_file",
+                  config.get("pretext_requirements_file", "requirements.txt"),
+              )
+              checksum_file = config.get("pretext_checksum_file", "")
+              if checksum_file:
+                  safe_relative_path("pretext_checksum_file", checksum_file)
+              for key in ("pretext_pdf_target", "pretext_web_target"):
+                  value = config[key]
+                  if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", value):
+                      raise SystemExit(f"{key} deve ser um nome de alvo seguro.")
           if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", config["id"]):
               raise SystemExit("id do livro inválido.")
           if not re.fullmatch(r"\d+\.\d+\.\d+", version):
@@ -245,4 +277,3 @@ jobs:
             --head "${RELEASE_BRANCH}" \
             --title "release: ${GITHUB_REPOSITORY##*/} ${RELEASE_TAG}" \
             --body-file "${RUNNER_TEMP}/release-pr-body.md"
-

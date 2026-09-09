@@ -49,6 +49,7 @@ jobs:
       pretext_project_file: ${{ steps.config.outputs.pretext_project_file }}
       pretext_pdf_target: ${{ steps.config.outputs.pretext_pdf_target }}
       pretext_web_target: ${{ steps.config.outputs.pretext_web_target }}
+      pretext_requirements_file: ${{ steps.config.outputs.pretext_requirements_file }}
       pretext_checksum_file: ${{ steps.config.outputs.pretext_checksum_file }}
       source_prefix: ${{ steps.config.outputs.source_prefix }}
       tex_entrypoint: ${{ steps.config.outputs.tex_entrypoint }}
@@ -160,8 +161,38 @@ jobs:
           missing = [key for key in required if not config.get(key)]
           if missing:
               raise SystemExit(f"Configuração do livro incompleta: {', '.join(missing)}")
-          if "pretext_checksum_file" in config and not isinstance(config["pretext_checksum_file"], str):
-              raise SystemExit("pretext_checksum_file deve ser uma string quando informado.")
+
+          def safe_relative_path(key: str, value: object) -> None:
+              if not isinstance(value, str) or not value or "\\" in value:
+                  raise SystemExit(f"{key} deve ser um caminho relativo e seguro.")
+              path = Path(value)
+              if path.is_absolute() or ".." in path.parts or value.endswith("/"):
+                  raise SystemExit(f"{key} deve ser um caminho relativo e seguro.")
+
+          pdf_name = config["pdf_name"]
+          if (
+              not isinstance(pdf_name, str)
+              or not pdf_name
+              or "/" in pdf_name
+              or "\\" in pdf_name
+              or pdf_name in {".", ".."}
+          ):
+              raise SystemExit("pdf_name deve ser um nome de arquivo simples e seguro.")
+          if build_system == "pretext":
+              if "pretext_checksum_file" in config and not isinstance(config["pretext_checksum_file"], str):
+                  raise SystemExit("pretext_checksum_file deve ser uma string quando informado.")
+              safe_relative_path("pretext_project_file", config["pretext_project_file"])
+              safe_relative_path(
+                  "pretext_requirements_file",
+                  config.get("pretext_requirements_file", "requirements.txt"),
+              )
+              checksum_file = config.get("pretext_checksum_file", "")
+              if checksum_file:
+                  safe_relative_path("pretext_checksum_file", checksum_file)
+              for key in ("pretext_pdf_target", "pretext_web_target"):
+                  value = config[key]
+                  if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", value):
+                      raise SystemExit(f"{key} deve ser um nome de alvo seguro.")
           if not re.fullmatch(r"[^/\s]+/[^/\s]+", config["portal_repository"]):
               raise SystemExit("portal_repository inválido.")
           portal_name = config["portal_repository"].split("/", 1)[1]
@@ -175,6 +206,7 @@ jobs:
                   "pretext_project_file": config.get("pretext_project_file", ""),
                   "pretext_pdf_target": config.get("pretext_pdf_target", ""),
                   "pretext_web_target": config.get("pretext_web_target", ""),
+                  "pretext_requirements_file": config.get("pretext_requirements_file", "requirements.txt"),
                   "pretext_checksum_file": config.get("pretext_checksum_file", ""),
                   "source_prefix": config["source_prefix"],
                   "tex_entrypoint": config.get("tex_entrypoint", ""),
@@ -280,6 +312,7 @@ jobs:
       pretext_project_file: ${{ needs.resolve.outputs.pretext_project_file }}
       pretext_pdf_target: ${{ needs.resolve.outputs.pretext_pdf_target }}
       pretext_web_target: ${{ needs.resolve.outputs.pretext_web_target }}
+      pretext_requirements_file: ${{ needs.resolve.outputs.pretext_requirements_file }}
       pretext_checksum_file: ${{ needs.resolve.outputs.pretext_checksum_file }}
       pdf_name: ${{ needs.resolve.outputs.pdf_name }}
       pdf_version_marker: ${{ needs.resolve.outputs.pdf_version_marker }}
@@ -530,7 +563,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -s "pretext-release-assets/${PDF_NAME}"
+          release_pdf="pretext-release-assets/${PDF_NAME}"
+          test -s "${release_pdf}"
           test -s pretext-release-assets/pretext-fonts.tar.gz
           test -s pretext-release-assets/build-environment.txt
           test -f pretext-release-assets/web/index.html
@@ -548,6 +582,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          release_pdf="pretext-release-assets/${PDF_NAME}"
           metadata_file="${SOURCE_PREFIX}-${RELEASE_TAG}-metadata.txt"
           source_dir="${SOURCE_PREFIX}-${RELEASE_TAG}-source"
           source_asset="${source_dir}.tar.gz"
@@ -569,10 +604,11 @@ jobs:
           cp pretext-release-assets/build-environment.txt build-environment.txt
           cp pretext-release-assets/pretext-fonts.tar.gz pretext-fonts.tar.gz
           tar -czf pretext-web.tar.gz -C pretext-release-assets/web .
-          sha256sum "${PDF_NAME}" "${source_asset}" "${metadata_file}" \
-            pretext-fonts.tar.gz pretext-web.tar.gz build-environment.txt \
-            pretext-build-SHA256SUMS > SHA256SUMS
-          pdf_sha256="$(sha256sum "${PDF_NAME}" | awk '{print $1}')"
+          pdf_checksum="$(sha256sum "${release_pdf}" | awk '{print $1}')"
+          printf '%s  %s\n' "${pdf_checksum}" "${PDF_NAME}" > SHA256SUMS
+          sha256sum "${source_asset}" "${metadata_file}" pretext-fonts.tar.gz \
+            pretext-web.tar.gz build-environment.txt pretext-build-SHA256SUMS >> SHA256SUMS
+          pdf_sha256="${pdf_checksum}"
           echo "pdf_sha256=${pdf_sha256}" >> "${GITHUB_OUTPUT}"
           echo "RELEASE_METADATA=${metadata_file}" >> "${GITHUB_ENV}"
           echo "SOURCE_ASSET=${source_asset}" >> "${GITHUB_ENV}"
@@ -602,7 +638,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          assets=("${PDF_NAME}" pretext-fonts.tar.gz pretext-web.tar.gz "${SOURCE_ASSET}" "${RELEASE_METADATA}" build-environment.txt SHA256SUMS pretext-build-SHA256SUMS)
+          release_pdf="pretext-release-assets/${PDF_NAME}"
+          assets=("${release_pdf}" pretext-fonts.tar.gz pretext-web.tar.gz "${SOURCE_ASSET}" "${RELEASE_METADATA}" build-environment.txt SHA256SUMS pretext-build-SHA256SUMS)
           if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             is_draft="$(gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --json isDraft --jq '.isDraft')"
             if [[ "${is_draft}" == "true" ]]; then
@@ -627,6 +664,27 @@ jobs:
               gh release edit "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --draft=false --prerelease=false
             fi
           fi
+
+      - name: Verificar PDF publicado contra artefato PreTeXt validado
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_pdf="pretext-release-assets/${PDF_NAME}"
+          expected_sha256="$(sha256sum "${release_pdf}" | awk '{print $1}')"
+          published_dir="${RUNNER_TEMP}/published-pretext-release"
+          mkdir -p "${published_dir}"
+          gh release download "${RELEASE_TAG}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --pattern "${PDF_NAME}" \
+            --dir "${published_dir}" \
+            --clobber
+          published_sha256="$(sha256sum "${published_dir}/${PDF_NAME}" | awk '{print $1}')"
+          [[ "${published_sha256}" == "${expected_sha256}" ]] || {
+            echo "O PDF publicado diverge do artefato PreTeXt validado."
+            exit 1
+          }
 
   dispatch:
     name: Propor atualização do catálogo
