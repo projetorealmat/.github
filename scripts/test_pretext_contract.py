@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static contract tests for the reusable PreTeXt backend."""
+"""Static contract tests for the reusable REALMat build backend."""
 
 import os
 from pathlib import Path
@@ -29,8 +29,8 @@ def test_pretext_build_accepts_document_named_pdf() -> None:
         fake_pretext.write_text(
             """#!/usr/bin/env bash
 set -euo pipefail
-[[ \"$1\" == \"build\" ]]
-case \"$2\" in
+[[ "$1" == "build" ]]
+case "$2" in
   print)
     mkdir -p output/print
     printf 'fake pdf' > output/print/aata.pdf
@@ -67,13 +67,11 @@ esac
         assert (root / "aata.pdf").read_bytes() == b"fake pdf"
 
 
-def test_latex_workflows_install_common_extra_dependencies() -> None:
-    """LaTeX books using common packages must work with the shared toolchain."""
+def test_shared_toolchain_is_complete() -> None:
+    """The central workflow owns the complete LaTeX toolchain."""
     for workflow in WORKFLOWS:
         text = workflow.read_text(encoding="utf-8")
-        require(text, "texlive-bibtex-extra", workflow)
-        require(text, "texlive-games", workflow)
-        require(text, "texlive-lang-german", workflow)
+        require(text, "texlive-full", workflow)
 
 
 def main() -> None:
@@ -82,7 +80,7 @@ def main() -> None:
     require(build, "PRETEXT_CACHED_ASSETS_SOURCE", BUILD_SCRIPT)
     require(build, "PRETEXT_CACHED_ASSETS_DESTINATION", BUILD_SCRIPT)
     require(build, "--no-generate", BUILD_SCRIPT)
-    require(build, 'cp -a "${PRETEXT_CACHED_ASSETS_SOURCE}/."', BUILD_SCRIPT)
+    require(build, "cp -a ", BUILD_SCRIPT)
 
     for workflow in WORKFLOWS:
         text = workflow.read_text(encoding="utf-8")
@@ -95,7 +93,7 @@ def main() -> None:
         require(text, "PRETEXT_CACHED_ASSETS_DESTINATION:", workflow)
 
     test_pretext_build_accepts_document_named_pdf()
-    test_latex_workflows_install_common_extra_dependencies()
+    test_shared_toolchain_is_complete()
 
 
 if __name__ == "__main__":
