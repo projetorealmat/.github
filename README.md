@@ -22,7 +22,7 @@ Cada livro mantém somente `.realmat/book.json`, `CITATION.cff`, os marcadores d
 - `prepare-release-pr.yml` chama `book-prepare-release.yml`;
 - `release-pdf.yml` chama `book-publish-release.yml`.
 
-O JSON declara os metadados do catálogo e uma entrada principal. O backend pode ser `latex` (`latex_entrypoint` e `latex_engine`) ou `pretext` (`pretext_project_file`, `pretext_pdf_target` e, opcionalmente, `pretext_web_target`).
+O JSON declara os metadados do catálogo e uma entrada principal. O backend pode ser `latex` (`latex_entrypoint` e `latex_engine`) ou `pretext` (`pretext_project_file`, `pretext_pdf_target` e, opcionalmente, `pretext_web_target`). Para projetos PreTeXt que versionam assets gerados, `pretext_generate` pode ser definido como `false`, junto com `pretext_cached_assets_source` e, opcionalmente, `pretext_cached_assets_destination` (padrão: `generated-assets`). O workflow copia esses assets e executa o build com `--no-generate`, evitando dependências externas indisponíveis no runner.
 
 Os callers usam a branch `main` deste repositório. A PR central deve ser mesclada antes das PRs dos livros; depois disso, cada livro passa a enxergar a mesma implementação.
 

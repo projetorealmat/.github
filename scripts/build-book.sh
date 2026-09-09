@@ -7,9 +7,29 @@ set -euo pipefail
 if [[ "${BUILD_SYSTEM}" == "pretext" ]]; then
   : "${PRETEXT_PROJECT_FILE:?PRETEXT_PROJECT_FILE is required}"
   : "${PRETEXT_PDF_TARGET:?PRETEXT_PDF_TARGET is required}"
-  pretext build "${PRETEXT_PDF_TARGET}"
+  pretext_build_options=()
+  case "${PRETEXT_GENERATE:-true}" in
+    true) ;;
+    false) pretext_build_options+=(--no-generate) ;;
+    *) echo "PRETEXT_GENERATE inválido: ${PRETEXT_GENERATE}"; exit 1 ;;
+  esac
+
+  if [[ -n "${PRETEXT_CACHED_ASSETS_SOURCE:-}" ]]; then
+    cached_destination="${PRETEXT_CACHED_ASSETS_DESTINATION:-generated-assets}"
+    case "${cached_destination}" in
+      /*|..|../*|*/../*|*/..) echo "Destino de assets PreTeXt inválido: ${cached_destination}"; exit 1 ;;
+    esac
+    test -d "${PRETEXT_CACHED_ASSETS_SOURCE}" || {
+      echo "Assets PreTeXt não encontrados: ${PRETEXT_CACHED_ASSETS_SOURCE}"
+      exit 1
+    }
+    mkdir -p "${cached_destination}"
+    cp -a "${PRETEXT_CACHED_ASSETS_SOURCE}/." "${cached_destination}/"
+  fi
+
+  pretext build "${PRETEXT_PDF_TARGET}" "${pretext_build_options[@]}"
   if [[ -n "${PRETEXT_WEB_TARGET:-}" ]]; then
-    pretext build "${PRETEXT_WEB_TARGET}"
+    pretext build "${PRETEXT_WEB_TARGET}" "${pretext_build_options[@]}"
     web_path="$(dirname "${PRETEXT_PROJECT_FILE}")/output/${PRETEXT_WEB_TARGET}"
     test -d "${web_path}" || { echo "Saída web PreTeXt não encontrada: ${web_path}"; exit 1; }
     test -s "${web_path}/index.html" || { echo "Página inicial PreTeXt não encontrada: ${web_path}/index.html"; exit 1; }
