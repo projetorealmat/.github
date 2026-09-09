@@ -100,6 +100,17 @@ jobs:
           base_branch = config.get("base_branch", os.environ.get("GITHUB_REF_NAME", "main"))
           if not re.fullmatch(r"[A-Za-z0-9._/-]+", base_branch) or base_branch.startswith("/"):
               raise SystemExit("base_branch inválida.")
+          readme_start = config.get("readme_release_start", "<!-- realmat-release:start -->")
+          readme_end = config.get("readme_release_end", "<!-- realmat-release:end -->")
+          if (
+              not isinstance(readme_start, str)
+              or not isinstance(readme_end, str)
+              or not readme_start.strip()
+              or not readme_end.strip()
+              or "\n" in readme_start
+              or "\n" in readme_end
+          ):
+              raise SystemExit("Marcadores do README inválidos.")
           release_tag = f"v{version}"
           release_branch = f"release/{release_tag}"
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
@@ -110,6 +121,8 @@ jobs:
                   "release_branch": release_branch,
                   "citation_file": citation_file,
                   "readme_file": readme_file,
+                  "readme_start": readme_start,
+                  "readme_end": readme_end,
               }.items():
                   output.write(f"{key}={value}\n")
           PY
@@ -130,16 +143,18 @@ jobs:
           RELEASE_DATE: ${{ steps.release.outputs.release_date }}
           CITATION_FILE: ${{ steps.release.outputs.citation_file }}
           README_FILE: ${{ steps.release.outputs.readme_file }}
+          README_START: ${{ steps.release.outputs.readme_start }}
+          README_END: ${{ steps.release.outputs.readme_end }}
         shell: bash
         run: |
           set -euo pipefail
-          python3 - "${CONFIG}" "${RELEASE_TAG}" "${RELEASE_DATE}" "${CITATION_FILE}" "${README_FILE}" <<'PY'
+          python3 - "${CONFIG}" "${RELEASE_TAG}" "${RELEASE_DATE}" "${CITATION_FILE}" "${README_FILE}" "${README_START}" "${README_END}" <<'PY'
           import os
           import re
           import sys
           from pathlib import Path
 
-          _, tag, release_date, citation_name, readme_name = sys.argv[1:]
+          _, tag, release_date, citation_name, readme_name, start, end = sys.argv[1:]
           citation_path = Path(citation_name)
           citation = citation_path.read_text(encoding="utf-8")
           citation, count = re.subn(
@@ -160,8 +175,6 @@ jobs:
 
           readme_path = Path(readme_name)
           readme = readme_path.read_text(encoding="utf-8")
-          start = "<!-- realmat-release:start -->"
-          end = "<!-- realmat-release:end -->"
           if readme.count(start) != 1 or readme.count(end) != 1:
               raise SystemExit("README precisa conter os marcadores REALMat.")
           repository = os.environ["GITHUB_REPOSITORY"]
@@ -197,7 +210,7 @@ jobs:
           cat > "${RUNNER_TEMP}/release-pr.md" <<EOF
           ## Release PR — ${RELEASE_TAG}
 
-          Esta PR prepara a publicação de ${RELEASE_TAG} em ${RELEASE_DATE}.
+          Esta PR prepara a publicação da edição REALMat ${RELEASE_TAG} em ${RELEASE_DATE}.
           O merge desta PR autoriza a compilação e a publicação automáticas.
           EOF
           gh pr create --base "${BASE_BRANCH}" --head "${RELEASE_BRANCH}" \
