@@ -66,7 +66,9 @@ elif [[ "${BUILD_SYSTEM}" == "latex" ]]; then
   esac
   pdf_path="${base}.pdf"
   test -f "${pdf_path}" || { echo "PDF LaTeX não encontrado: ${pdf_path}"; exit 1; }
-  cp "${pdf_path}" "${PDF_NAME}"
+  if [[ ! "${pdf_path}" -ef "${PDF_NAME}" ]]; then
+    cp "${pdf_path}" "${PDF_NAME}"
+  fi
 else
   echo "BUILD_SYSTEM inválido: ${BUILD_SYSTEM}"
   exit 1
