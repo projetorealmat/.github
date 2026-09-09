@@ -109,6 +109,8 @@ jobs:
       book_title: ${{ steps.config.outputs.book_title }}
       book_short_title: ${{ steps.config.outputs.book_short_title }}
       book_subject: ${{ steps.config.outputs.book_subject }}
+      source_url: ${{ steps.config.outputs.source_url }}
+      source_license: ${{ steps.config.outputs.source_license }}
     steps:
       - name: Checkout do commit da release
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
