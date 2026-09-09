@@ -223,17 +223,7 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y \
-            texlive-latex-base \
-            texlive-latex-recommended \
-            texlive-latex-extra \
-            texlive-fonts-recommended \
-            texlive-fonts-extra \
-            texlive-bibtex-extra \
-            texlive-games \
-            texlive-lang-english \
-            texlive-lang-portuguese \
-            texlive-lang-german \
-            texlive-xetex \
+            texlive-full \
             latexmk \
             poppler-utils \
             pdf2svg \
