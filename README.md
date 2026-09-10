@@ -1,36 +1,53 @@
 # REALMat — automação comum
 
-Este repositório contém os workflows reutilizáveis usados pelos livros e pelo portal do REALMat.
+Este repositório é a biblioteca central de automação do REALMat. Ele não contém o texto dos livros: mantém os workflows reutilizáveis, os scripts de verificação e o contrato comum para as edições traduzidas e adaptadas.
+
+O repositório pode ser público porque workflows e scripts não são segredos. A chave privada da GitHub App fica exclusivamente nos secrets da organização e nunca deve aparecer aqui.
 
 ## Configuração administrativa única
 
-Crie a GitHub App organizacional `REALMat Automation`, instale-a nos repositórios do REALMat e configure:
+A organização usa a GitHub App REALMat Automation, instalada nos repositórios do REALMat, com:
 
-- variável organizacional `REALMAT_AUTOMATION_APP_ID`;
-- secret organizacional `REALMAT_AUTOMATION_PRIVATE_KEY`;
-- permissões da App: `Contents: Read and write`, `Pull requests: Read and write` e `Metadata: Read-only`.
+- variável organizacional REALMAT_AUTOMATION_APP_ID;
+- secret organizacional REALMAT_AUTOMATION_PRIVATE_KEY;
+- permissões mínimas para conteúdo e pull requests nos repositórios necessários.
 
-A chave privada não pertence a este repositório e não deve aparecer em commits, logs ou mensagens.
+Não há PAT por livro, REALMAT_AUTOMATION_TOKEN ou PORTAL_DISPATCH_TOKEN.
 
-O repositório do portal também precisa permitir auto-merge, e sua branch `main` deve exigir os checks do build do Pages e dos links externos. Os repositórios de livros devem exigir o check de compilação do PDF.
+## Workflows centrais
 
-## Contrato mínimo de um livro
+Os quatro workflows reutilizáveis são:
 
-Cada livro mantém somente `.realmat/book.json`, `CITATION.cff`, os marcadores de release no `README.md` e três callers finos em `.github/workflows/`:
+- book-ci.yml: compila e valida o backend declarado pelo livro;
+- book-prepare-release.yml: abre a Release PR com a versão e a data;
+- book-publish-release.yml: depois do merge da Release PR, cria tag, GitHub Release, PDF, fontes e SHA256;
+- portal-catalog-sync.yml: valida o evento e abre a PR do catálogo, solicitando auto-merge.
 
-- `book-ci.yml` chama `book-ci.yml` para validar o backend declarado;
-- `prepare-release-pr.yml` chama `book-prepare-release.yml`;
-- `release-pdf.yml` chama `book-publish-release.yml`.
+A manutenção desta biblioteca é verificada pelo ci.yml. Os repositórios consumidores devem chamar os workflows por uma referência estável, @v2, criada depois que esta versão for revisada e mesclada.
 
-O JSON declara os metadados do catálogo e uma entrada principal. O backend pode ser `latex` (`latex_entrypoint` e `latex_engine`) ou `pretext` (`pretext_project_file`, `pretext_pdf_target` e, opcionalmente, `pretext_web_target`). Para projetos PreTeXt que versionam assets gerados, `pretext_generate` pode ser definido como `false`, junto com `pretext_cached_assets_source` e, opcionalmente, `pretext_cached_assets_destination` (padrão: `generated-assets`). O workflow copia esses assets e executa o build com `--no-generate`, evitando dependências externas indisponíveis no runner.
+## Contrato de um livro
 
-Os callers usam a branch `main` deste repositório. A PR central deve ser mesclada antes das PRs dos livros; depois disso, cada livro passa a enxergar a mesma implementação.
+Cada repositório projetorealmat/<livro> é a edição REALMat traduzida/adaptada que o projeto distribui. A origem externa aparece apenas como proveniência, créditos e licença; ela não é um item separado do catálogo.
 
-## Fluxo de release
+O repositório mantém:
 
-1. O usuário aciona `Preparar release PR` e informa a versão; a data pode ficar vazia.
-2. A automação abre uma Release PR com metadados e README.
-3. Depois do merge da Release PR, o workflow compila o PDF, cria a tag anotada, publica fontes, PDF e SHA256 na GitHub Release e envia o evento ao portal.
-4. O portal valida o catálogo, abre sua PR e solicita auto-merge; os checks obrigatórios continuam sendo a condição para o merge e o deploy.
+- conteúdo-fonte e arquivos específicos da edição;
+- .realmat/book.json, com metadados, backend e entrada principal;
+- CITATION.cff;
+- marcadores de release no README.md;
+- callers finos para verificação, preparação e publicação.
 
-Não há PAT por livro nem `PORTAL_DISPATCH_TOKEN`.
+O backend pode ser latex ou pretext. O workflow central não força a conversão de um livro para outro formato de entrada. Em PreTeXt, a saída web pode ser compilada como verificação; a publicação de novos formatos no catálogo deve ser adicionada ao contrato de artefatos quando houver uma edição pronta para isso.
+
+Uma validação editorial específica pode ser mantida no próprio livro quando realmente depender do seu conteúdo; ela não deve duplicar o build central.
+
+## Fluxo
+
+1. PRs normais alteram o conteúdo da edição e passam pelo check de compilação.
+2. O usuário aciona Preparar release PR.
+3. O usuário revisa e mescla a Release PR.
+4. A automação publica a tag, a GitHub Release, o PDF, as fontes e os checksums.
+5. A automação envia a atualização ao portal.
+6. O portal valida catálogo, links, assets e Pages; somente então a PR do catálogo pode fazer auto-merge e o site pode ser publicado.
+
+Apenas a Release PR é uma decisão editorial humana. A atualização do catálogo é mecânica, mas continua subordinada aos checks obrigatórios do portal.

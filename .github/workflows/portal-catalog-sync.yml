@@ -87,6 +87,8 @@ jobs:
               raise SystemExit("A versão e a ref devem ser a mesma tag semver.")
           if not re.fullmatch(r"[^/\s]+/[^/\s]+", book["repository"]):
               raise SystemExit("repository inválido.")
+          if not book["repository"].startswith("projetorealmat/"):
+              raise SystemExit("O catálogo só aceita releases dos repositórios REALMat.")
           if not re.fullmatch(r"[0-9a-f]{64}", book["sha256"]):
               raise SystemExit("sha256 inválido.")
           major, minor, patch = (int(part) for part in version_match.groups())
@@ -103,6 +105,13 @@ jobs:
               raise SystemExit("pdf_path não segue o contrato versionado do portal.")
           if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", book.get("release_date", "")):
               raise SystemExit("release_date deve usar AAAA-MM-DD.")
+          for key in ("source_url", "source_license"):
+              if key in book and (
+                  not isinstance(book[key], str) or not book[key].strip()
+              ):
+                  raise SystemExit(f"{key} inválido.")
+          if "source_url" in book and not re.fullmatch(r"https?://\S+", book["source_url"]):
+              raise SystemExit("source_url deve ser uma URL HTTP(S).")
 
           release = {key: book[key] for key in required_release}
           release["release_date"] = book["release_date"]
@@ -113,6 +122,9 @@ jobs:
               return tuple(int(part) for part in value[1:].split("."))
 
           book_record = {key: book[key] for key in required_book}
+          for key in ("source_url", "source_license"):
+              if key in book:
+                  book_record[key] = book[key]
           book_record["current_version"] = book["version"]
           changed = False
           for item in catalog:

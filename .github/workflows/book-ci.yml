@@ -65,7 +65,11 @@ jobs:
           pretext_generate = config.get("pretext_generate", True)
           if not isinstance(pretext_generate, bool):
               raise SystemExit("pretext_generate deve ser booleano.")
-          for key in ("pretext_cached_assets_source", "pretext_cached_assets_destination"):
+          for key in (
+              "pretext_cached_assets_source",
+              "pretext_cached_assets_destination",
+              "validation_script",
+          ):
               value = config.get(key, "")
               if not isinstance(value, str):
                   raise SystemExit(f"{key} deve ser uma string quando informado.")
@@ -84,6 +88,7 @@ jobs:
               "pretext_cached_assets_destination": config.get("pretext_cached_assets_destination", "generated-assets"),
               "latex_entrypoint": config.get("latex_entrypoint", ""),
               "latex_engine": config.get("latex_engine", "xelatex"),
+              "validation_script": config.get("validation_script", ""),
           }
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               for key, value in values.items():
@@ -116,6 +121,13 @@ jobs:
             # anterior ao lxml 6.1.3.
             python -m pip install --requirement "${PRETEXT_REQUIREMENTS_FILE}" "lxml<6.1.3"
           fi
+
+      - name: Validar conteúdo específico do livro
+        if: ${{ steps.config.outputs.validation_script != '' }}
+        env:
+          VALIDATION_SCRIPT: ${{ steps.config.outputs.validation_script }}
+        shell: bash
+        run: python3 "${VALIDATION_SCRIPT}"
 
       - name: Compilar
         env:

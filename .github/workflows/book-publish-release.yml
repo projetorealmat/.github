@@ -49,6 +49,7 @@ jobs:
           EVENT_PR: ${{ github.event.pull_request.number }}
           REQUESTED_PR: ${{ inputs.release_pr }}
           REPOSITORY: ${{ github.repository }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         shell: bash
         run: |
           set -euo pipefail
@@ -62,8 +63,9 @@ jobs:
           import json
           import sys
           from pathlib import Path
+          import os
           config = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-          print(config.get("base_branch", "main"))
+          print(config.get("base_branch", os.environ.get("DEFAULT_BRANCH", "main")))
           PY
           )"
           pr_json="$(gh api "repos/${REPOSITORY}/pulls/${pr_number}")"
@@ -107,6 +109,8 @@ jobs:
       book_title: ${{ steps.config.outputs.book_title }}
       book_short_title: ${{ steps.config.outputs.book_short_title }}
       book_subject: ${{ steps.config.outputs.book_subject }}
+      source_url: ${{ steps.config.outputs.source_url }}
+      source_license: ${{ steps.config.outputs.source_license }}
     steps:
       - name: Checkout do commit da release
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -160,6 +164,9 @@ jobs:
               "pretext_cached_assets_destination": config.get("pretext_cached_assets_destination", "generated-assets"),
               "latex_entrypoint": config.get("latex_entrypoint", ""),
               "latex_engine": config.get("latex_engine", "xelatex"),
+              "validation_script": config.get("validation_script", ""),
+              "source_url": config.get("source_url", ""),
+              "source_license": config.get("source_license", ""),
               "portal_repository": portal,
               "portal_name": name,
               "book_id": config["id"],
@@ -208,8 +215,15 @@ jobs:
               output.write(f"release_status={status}\n")
           PY
 
+      - name: Validar conteúdo específico do livro
+        if: ${{ steps.config.outputs.validation_script != '' }}
+        env:
+          VALIDATION_SCRIPT: ${{ steps.config.outputs.validation_script }}
+        shell: bash
+        run: python3 "${VALIDATION_SCRIPT}"
+
       - name: Configurar Python
-        if: steps.config.outputs.build_system == 'pretext'
+        if: ${{ steps.config.outputs.build_system == 'pretext' }}
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
@@ -260,6 +274,7 @@ jobs:
           RELEASE_DATE: ${{ steps.metadata.outputs.release_date }}
           RELEASE_STATUS: ${{ steps.metadata.outputs.release_status }}
           RELEASE_PR: ${{ needs.resolve.outputs.release_pr }}
+          SOURCE_URL: ${{ steps.config.outputs.source_url }}
         shell: bash
         run: |
           set -euo pipefail
@@ -273,6 +288,9 @@ jobs:
             printf 'Status editorial: %s\n' "${RELEASE_STATUS}"
             printf 'Commit: %s\n' "${RELEASE_COMMIT}"
             printf 'Release PR: #%s\n' "${RELEASE_PR}"
+            if [[ -n "${SOURCE_URL:-}" ]]; then
+              printf 'Fonte upstream: %s\n' "${SOURCE_URL}"
+            fi
           } > "${metadata_file}"
           git archive --format=tar --prefix="${source_dir}/" "${RELEASE_COMMIT}" | tar -x
           cp "${metadata_file}" "${source_dir}/"
@@ -396,6 +414,8 @@ jobs:
           BOOK_TITLE: ${{ needs.build.outputs.book_title }}
           BOOK_SHORT_TITLE: ${{ needs.build.outputs.book_short_title }}
           BOOK_SUBJECT: ${{ needs.build.outputs.book_subject }}
+          SOURCE_URL: ${{ needs.build.outputs.source_url }}
+          SOURCE_LICENSE: ${{ needs.build.outputs.source_license }}
           PORTAL_REPOSITORY: ${{ needs.build.outputs.portal_repository }}
         shell: bash
         run: |
@@ -422,6 +442,9 @@ jobs:
               "sha256": os.environ["PDF_SHA256"],
               "release_date": os.environ["RELEASE_DATE"],
           }
+          for key in ("source_url", "source_license"):
+              if os.environ.get(key):
+                  book[key] = os.environ[key]
           payload = {"event_type": "book-release", "client_payload": {"book": book}}
           Path("catalog-dispatch.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
           PY
