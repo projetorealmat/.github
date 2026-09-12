@@ -49,6 +49,20 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
           fetch-depth: 0
 
+      - name: Checkout dos scripts REALMat
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .realmat-central
+
+      - name: Validar contrato de publicações
+        env:
+          CONFIG: ${{ inputs.config }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+        shell: bash
+        run: python3 .realmat-central/scripts/publication_contract.py --config "${CONFIG}"
+
       - name: Validar configuração e preparar metadados
         id: release
         env:
@@ -159,12 +173,16 @@ jobs:
         run: |
           set -euo pipefail
           python3 - "${CONFIG}" "${RELEASE_TAG}" "${RELEASE_DATE}" "${CITATION_FILE}" "${README_FILE}" "${README_START}" "${README_END}" "${README_SENTENCE_ANCHOR}" "${README_SENTENCE_TEMPLATE}" <<'PY'
+          import json
           import os
           import re
           import sys
           from pathlib import Path
 
-          _, tag, release_date, citation_name, readme_name, start, end, sentence_anchor, sentence_template = sys.argv[1:]
+          sys.path.insert(0, ".realmat-central/scripts")
+          from publication_contract import stage_for_version
+
+          config_name, tag, release_date, citation_name, readme_name, start, end, sentence_anchor, sentence_template = sys.argv[1:]
           citation_path = Path(citation_name)
           citation = citation_path.read_text(encoding="utf-8")
           citation, count = re.subn(
@@ -183,16 +201,34 @@ jobs:
               citation = citation.rstrip() + f"\ndate-released: {release_date}\n"
           citation_path.write_text(citation, encoding="utf-8")
 
+          config_path = Path(config_name)
+          config = json.loads(config_path.read_text(encoding="utf-8"))
+          config["translation_stage"] = stage_for_version(tag)
+          config_path.write_text(
+              json.dumps(config, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+
           readme_path = Path(readme_name)
           readme = readme_path.read_text(encoding="utf-8")
           if readme.count(start) != 1 or readme.count(end) != 1:
               raise SystemExit("README precisa conter os marcadores REALMat.")
           repository = os.environ["GITHUB_REPOSITORY"]
+          config = json.loads(Path(config_name).read_text(encoding="utf-8"))
+          release_base = f"https://github.com/{repository}/releases/download/{tag}"
+          publication_lines = []
+          for publication in config["publications"]:
+              if publication["id"] == "pdf":
+                  url = f"{release_base}/{config['pdf_name']}"
+              else:
+                  url = publication["url"]
+              publication_lines.append(f"- [{publication['label']}]({url})")
           replacement = (
               f"{start}\n"
               f"- Release REALMat atualmente recomendada: "
               f"[{tag}](https://github.com/{repository}/releases/tag/{tag}).\n"
-              f"{end}"
+              + "\n".join(publication_lines)
+              + f"\n{end}"
           )
           readme = re.sub(re.escape(start) + r".*?" + re.escape(end), replacement, readme, count=1, flags=re.DOTALL)
           if sentence_anchor:
@@ -215,6 +251,7 @@ jobs:
       - name: Criar Release PR
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          CONFIG: ${{ inputs.config }}
           BASE_BRANCH: ${{ steps.release.outputs.base_branch }}
           RELEASE_BRANCH: ${{ steps.release.outputs.release_branch }}
           RELEASE_TAG: ${{ steps.release.outputs.release_tag }}
@@ -227,7 +264,7 @@ jobs:
           git config user.name "REALMat Automation"
           git config user.email "realmat-automation[bot]@users.noreply.github.com"
           git switch -c "${RELEASE_BRANCH}"
-          git add "${CITATION_FILE}" "${README_FILE}"
+          git add "${CITATION_FILE}" "${README_FILE}" "${CONFIG}"
           git commit -m "chore(release): prepare ${RELEASE_TAG}"
           git push --set-upstream origin "${RELEASE_BRANCH}"
           cat > "${RUNNER_TEMP}/release-pr.md" <<EOF

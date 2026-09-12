@@ -50,6 +50,13 @@ jobs:
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
 
+      - name: Checkout dos scripts REALMat
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .realmat-central
+
       - name: Validar payload e atualizar catálogo
         id: catalog
         env:
@@ -62,66 +69,98 @@ jobs:
           import json
           import os
           import re
+          import sys
+          from datetime import date
           from pathlib import Path
+          from urllib.parse import urlparse
+
+          sys.path.insert(0, ".realmat-central/scripts")
+          from publication_contract import ContractError, stage_for_version, validate_publication_manifest
 
           payload = json.loads(os.environ["DISPATCH_PAYLOAD"] or "{}")
           book = payload.get("book")
           if not isinstance(book, dict):
               raise SystemExit("O payload deve conter o objeto book.")
 
-          required_book = ("id", "title", "short_title", "subject")
-          required_release = (
-              "version", "status", "repository", "ref", "release_url",
-              "pdf_url", "pdf_path", "sha256",
+          required_scalar = (
+              "id", "title", "short_title", "subject", "version",
+              "translation_stage", "repository", "ref", "release_url",
+              "release_date",
           )
           missing = [
-              key for key in required_book + required_release
+              key for key in required_scalar
               if not isinstance(book.get(key), str) or not book[key].strip()
           ]
           if missing:
               raise SystemExit(f"Payload incompleto: {', '.join(missing)}")
           if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", book["id"]):
               raise SystemExit("id do livro inválido.")
-          version_match = re.fullmatch(r"v(\d+)\.(\d+)\.(\d+)", book["version"])
-          if version_match is None or book["ref"] != book["version"]:
+          if re.fullmatch(r"v\d+\.\d+\.\d+", book["version"]) is None or book["ref"] != book["version"]:
               raise SystemExit("A versão e a ref devem ser a mesma tag semver.")
           if not re.fullmatch(r"[^/\s]+/[^/\s]+", book["repository"]):
               raise SystemExit("repository inválido.")
           if not book["repository"].startswith("projetorealmat/"):
               raise SystemExit("O catálogo só aceita releases dos repositórios REALMat.")
-          if not re.fullmatch(r"[0-9a-f]{64}", book["sha256"]):
-              raise SystemExit("sha256 inválido.")
-          major, minor, patch = (int(part) for part in version_match.groups())
-          expected_status = (
-              "em revisão" if major == 0 else
-              "tradução aprovada" if (major, minor, patch) == (1, 0, 0) else
-              "versão revisada" if major == 1 else
-              "nova versão"
+          try:
+              expected_stage = stage_for_version(book["version"])
+          except ContractError as error:
+              raise SystemExit(str(error)) from error
+          if book["translation_stage"] != expected_stage:
+              raise SystemExit("translation_stage incompatível com a versão.")
+          expected_release_url = f"https://github.com/{book['repository']}/releases/tag/{book['version']}"
+          if book["release_url"] != expected_release_url:
+              raise SystemExit("release_url não segue a tag publicada.")
+          try:
+              date.fromisoformat(book["release_date"])
+          except ValueError as error:
+              raise SystemExit("release_date deve usar AAAA-MM-DD.") from error
+
+          manifest = {
+              "translation_stage": book["translation_stage"],
+              "entrypoint": book.get("entrypoint"),
+              "publications": book.get("publications"),
+          }
+          try:
+              validate_publication_manifest(manifest)
+          except ContractError as error:
+              raise SystemExit(f"Manifesto de publicações inválido: {error}") from error
+          pdf = next(publication for publication in book["publications"] if publication["id"] == "pdf")
+          expected_pdf_prefix = (
+              f"https://github.com/{book['repository']}/releases/download/{book['version']}/"
           )
-          if book["status"] != expected_status:
-              raise SystemExit("Status editorial incompatível com a versão.")
-          expected_pdf_path = f"/assets/books/{book['id']}/{book['version']}/"
-          if not book["pdf_path"].startswith(expected_pdf_path) or not book["pdf_path"].endswith(".pdf"):
-              raise SystemExit("pdf_path não segue o contrato versionado do portal.")
-          if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", book.get("release_date", "")):
-              raise SystemExit("release_date deve usar AAAA-MM-DD.")
+          if not pdf["url"].startswith(expected_pdf_prefix):
+              raise SystemExit("A URL do PDF não aponta para a Release canônica.")
+
           for key in ("source_url", "source_license"):
               if key in book and (
                   not isinstance(book[key], str) or not book[key].strip()
               ):
                   raise SystemExit(f"{key} inválido.")
-          if "source_url" in book and not re.fullmatch(r"https?://\S+", book["source_url"]):
-              raise SystemExit("source_url deve ser uma URL HTTP(S).")
+          if "source_url" in book:
+              parsed_source = urlparse(book["source_url"])
+              if parsed_source.scheme not in {"http", "https"} or not parsed_source.netloc:
+                  raise SystemExit("source_url deve ser uma URL HTTP(S).")
 
-          release = {key: book[key] for key in required_release}
-          release["release_date"] = book["release_date"]
+          release = {
+              "version": book["version"],
+              "translation_stage": book["translation_stage"],
+              "repository": book["repository"],
+              "ref": book["ref"],
+              "release_url": book["release_url"],
+              "release_date": book["release_date"],
+              "entrypoint": book["entrypoint"],
+              "publications": book["publications"],
+          }
           catalog_path = Path(os.environ["CATALOG_FILE"])
           catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
 
           def version_key(value: str) -> tuple[int, int, int]:
               return tuple(int(part) for part in value[1:].split("."))
 
-          book_record = {key: book[key] for key in required_book}
+          book_record = {
+              key: book[key]
+              for key in ("id", "title", "short_title", "subject", "repository", "translation_stage")
+          }
           for key in ("source_url", "source_license"):
               if key in book:
                   book_record[key] = book[key]
@@ -135,8 +174,9 @@ jobs:
               for index, candidate in enumerate(existing):
                   if candidate.get("version") == release["version"]:
                       if candidate != release:
-                          existing[index] = release
-                          changed = True
+                          raise SystemExit(
+                              f"Conflito de release para {release['version']}: os dados publicados não coincidem."
+                          )
                       replaced = True
                       break
               if not replaced:
@@ -145,7 +185,11 @@ jobs:
               if any(item.get(key) != value for key, value in book_record.items()):
                   changed = True
               item.update(book_record)
-              item["releases"] = sorted(existing, key=lambda candidate: version_key(candidate["version"]), reverse=True)
+              item["releases"] = sorted(
+                  existing,
+                  key=lambda candidate: version_key(candidate["version"]),
+                  reverse=True,
+              )
               break
           else:
               catalog.append({**book_record, "releases": [release]})
