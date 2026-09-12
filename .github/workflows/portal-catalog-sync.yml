@@ -175,7 +175,7 @@ jobs:
                   if candidate.get("version") == release["version"]:
                       if candidate != release:
                           raise SystemExit(
-                              f"Conflito de release para {release[\"version\"]}: os dados publicados não coincidem."
+                              f"Conflito de release para {release['version']}: os dados publicados não coincidem."
                           )
                       replaced = True
                       break
