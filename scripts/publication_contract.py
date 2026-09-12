@@ -92,9 +92,15 @@ def _validate_publications(
             raise ContractError(f"id de publicação duplicado: {publication_id}.")
         seen.add(publication_id)
         label = _require_string(publication.get("label"), f"{field}.label")
-        format_name = _require_string(publication.get("format"), f"{field}.format")
-        if publication_id == "pdf" and format_name != "pdf":
-            raise ContractError("A publicação id=pdf deve ter format=pdf.")
+        format_value = publication.get("format")
+        if publication_id == "pdf":
+            format_name = _require_string(format_value, f"{field}.format")
+            if format_name != "pdf":
+                raise ContractError("A publicação id=pdf deve ter format=pdf.")
+        elif format_value is None:
+            format_name = None
+        else:
+            format_name = _require_string(format_value, f"{field}.format")
 
         has_url = "url" in publication and publication["url"] is not None
         if publication_id == "pdf" and not require_pdf_url and not has_url:
@@ -105,8 +111,9 @@ def _validate_publications(
         normalized_publication = {
             "id": publication_id,
             "label": label,
-            "format": format_name,
         }
+        if format_name is not None:
+            normalized_publication["format"] = format_name
         if url is not None:
             normalized_publication["url"] = url
         normalized.append(normalized_publication)
@@ -192,8 +199,9 @@ def resolve_manifest(
         resolved = {
             "id": publication_id,
             "label": publication["label"],
-            "format": publication["format"],
         }
+        if publication.get("format") is not None:
+            resolved["format"] = publication["format"]
         if publication_id == "pdf":
             resolved["url"] = _release_pdf_url(repository, tag, pdf_name)
         else:
