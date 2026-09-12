@@ -34,6 +34,12 @@ jobs:
           ref: ${{ job.workflow_sha }}
           path: .realmat-central
 
+      - name: Validar contrato de publicações
+        env:
+          CONFIG: ${{ inputs.config }}
+        shell: bash
+        run: python3 .realmat-central/scripts/publication_contract.py --config "${CONFIG}"
+
       - name: Ler configuração
         id: config
         env:
