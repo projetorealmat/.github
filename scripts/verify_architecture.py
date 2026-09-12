@@ -27,6 +27,7 @@ reusable_text = "\n".join(
 all_text = "\n".join(path.read_text(encoding="utf-8") for path in WORKFLOWS)
 prepare_text = (ROOT / ".github/workflows/book-prepare-release.yml").read_text(encoding="utf-8")
 portal_sync_text = (ROOT / ".github/workflows/portal-catalog-sync.yml").read_text(encoding="utf-8")
+publish_text = (ROOT / ".github/workflows/book-publish-release.yml").read_text(encoding="utf-8")
 
 for legacy_name in ("REALMAT_AUTOMATION_TOKEN", "PORTAL_DISPATCH_TOKEN"):
     assert legacy_name not in all_text, f"legacy credential remains: {legacy_name}"
@@ -45,9 +46,20 @@ assert "dispatches" in reusable_text, "book publication must dispatch through th
 assert 'git add "${CITATION_FILE}" "${README_FILE}" "${CONFIG}"' in prepare_text, (
     "release preparation must commit the updated book config"
 )
+release_pr_step = prepare_text.split("- name: Criar Release PR", 1)[1].split("\n      - name:", 1)[0]
+assert 'CONFIG: ${{ inputs.config }}' in release_pr_step, (
+    "release preparation must expose the config path to the commit step"
+)
 assert 'python3 "${{ inputs.validator_script }}" "${{ inputs.catalog_file }}"' in portal_sync_text, (
     "catalog sync must pass input paths without escaped expressions"
 )
+assert "Conflito de release" in portal_sync_text, "catalog sync must reject conflicting release data"
+assert all(
+    "--clobber" not in line
+    for line in publish_text.splitlines()
+    if "gh release upload" in line
+), "release uploads must not overwrite existing assets"
+assert "existing_release_assets" in publish_text, "release uploads must verify existing asset checksums"
 
 for path in WORKFLOWS:
     if path.name in REUSABLE:
