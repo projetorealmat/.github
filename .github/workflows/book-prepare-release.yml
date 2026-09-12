@@ -49,6 +49,20 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
           fetch-depth: 0
 
+      - name: Checkout dos scripts REALMat
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository }}
+          ref: ${{ job.workflow_sha }}
+          path: .realmat-central
+
+      - name: Validar contrato de publicações
+        env:
+          CONFIG: ${{ inputs.config }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+        shell: bash
+        run: python3 .realmat-central/scripts/publication_contract.py --config "${CONFIG}" --version "${REQUESTED_VERSION}"
+
       - name: Validar configuração e preparar metadados
         id: release
         env:
@@ -59,6 +73,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 - "${CONFIG}" "${REQUESTED_VERSION}" "${REQUESTED_DATE}" <<'PY'
+          import json
           import json
           import os
           import re
@@ -164,7 +179,7 @@ jobs:
           import sys
           from pathlib import Path
 
-          _, tag, release_date, citation_name, readme_name, start, end, sentence_anchor, sentence_template = sys.argv[1:]
+          config_name, tag, release_date, citation_name, readme_name, start, end, sentence_anchor, sentence_template = sys.argv[1:]
           citation_path = Path(citation_name)
           citation = citation_path.read_text(encoding="utf-8")
           citation, count = re.subn(
@@ -188,11 +203,21 @@ jobs:
           if readme.count(start) != 1 or readme.count(end) != 1:
               raise SystemExit("README precisa conter os marcadores REALMat.")
           repository = os.environ["GITHUB_REPOSITORY"]
+          config = json.loads(Path(config_name).read_text(encoding="utf-8"))
+          release_base = f"https://github.com/{repository}/releases/download/{tag}"
+          publication_lines = []
+          for publication in config["publications"]:
+              if publication["id"] == "pdf":
+                  url = f"{release_base}/{config['pdf_name']}"
+              else:
+                  url = publication["url"]
+              publication_lines.append(f"- [{publication['label']}]({url})")
           replacement = (
               f"{start}\n"
               f"- Release REALMat atualmente recomendada: "
               f"[{tag}](https://github.com/{repository}/releases/tag/{tag}).\n"
-              f"{end}"
+              + "\n".join(publication_lines)
+              + f"\n{end}"
           )
           readme = re.sub(re.escape(start) + r".*?" + re.escape(end), replacement, readme, count=1, flags=re.DOTALL)
           if sentence_anchor:
