@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   contract:
-    name: Validar contrato central
+    name: contract / Validar contrato central
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
