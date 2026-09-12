@@ -61,7 +61,7 @@ jobs:
           CONFIG: ${{ inputs.config }}
           REQUESTED_VERSION: ${{ inputs.version }}
         shell: bash
-        run: python3 .realmat-central/scripts/publication_contract.py --config "${CONFIG}" --version "${REQUESTED_VERSION}"
+        run: python3 .realmat-central/scripts/publication_contract.py --config "${CONFIG}"
 
       - name: Validar configuração e preparar metadados
         id: release
@@ -78,6 +78,8 @@ jobs:
           import os
           import re
           import sys
+          sys.path.insert(0, ".realmat-central/scripts")
+          from publication_contract import stage_for_version
           from datetime import date, datetime, timezone
           from pathlib import Path
 
@@ -197,6 +199,14 @@ jobs:
           else:
               citation = citation.rstrip() + f"\ndate-released: {release_date}\n"
           citation_path.write_text(citation, encoding="utf-8")
+
+          config_path = Path(config_name)
+          config = json.loads(config_path.read_text(encoding="utf-8"))
+          config["translation_stage"] = stage_for_version(tag)
+          config_path.write_text(
+              json.dumps(config, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
 
           readme_path = Path(readme_name)
           readme = readme_path.read_text(encoding="utf-8")
