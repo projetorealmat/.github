@@ -75,6 +75,19 @@ def test_html_pdf_epub_manifest_is_valid() -> None:
     validate_publication_manifest(manifest)
 
 
+def test_manifest_allows_non_pdf_without_format() -> None:
+    manifest = pdf_only_manifest()
+    manifest["publications"].insert(
+        0,
+        {
+            "id": "html",
+            "label": "Ler no navegador",
+            "url": "https://books.example.org/forallx/",
+        },
+    )
+    validate_publication_manifest(manifest)
+
+
 def test_manifest_requires_canonical_pdf() -> None:
     manifest = pdf_only_manifest()
     manifest["publications"] = []
@@ -158,6 +171,7 @@ def test_resolve_manifest_builds_pdf_url_and_entrypoint_object() -> None:
 def main() -> None:
     test_pdf_only_manifest_is_valid()
     test_html_pdf_epub_manifest_is_valid()
+    test_manifest_allows_non_pdf_without_format()
     test_manifest_requires_canonical_pdf()
     test_manifest_rejects_duplicate_publication_ids()
     test_manifest_rejects_inconsistent_entrypoint()
