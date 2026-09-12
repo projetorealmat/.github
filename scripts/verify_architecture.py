@@ -25,6 +25,8 @@ reusable_text = "\n".join(
     if path.name in REUSABLE
 )
 all_text = "\n".join(path.read_text(encoding="utf-8") for path in WORKFLOWS)
+prepare_text = (ROOT / ".github/workflows/book-prepare-release.yml").read_text(encoding="utf-8")
+portal_sync_text = (ROOT / ".github/workflows/portal-catalog-sync.yml").read_text(encoding="utf-8")
 
 for legacy_name in ("REALMAT_AUTOMATION_TOKEN", "PORTAL_DISPATCH_TOKEN"):
     assert legacy_name not in all_text, f"legacy credential remains: {legacy_name}"
@@ -40,6 +42,12 @@ assert "entrypoint" in reusable_text and "publications" in reusable_text, "catal
 assert "publication_contract.py" in reusable_text, "reusable workflows must use the central publication contract"
 assert "expected_pdf_path" not in reusable_text, "legacy PDF-only catalog path remains"
 assert "dispatches" in reusable_text, "book publication must dispatch through the App token"
+assert 'git add "${CITATION_FILE}" "${README_FILE}" "${CONFIG}"' in prepare_text, (
+    "release preparation must commit the updated book config"
+)
+assert 'python3 "${{ inputs.validator_script }}" "${{ inputs.catalog_file }}"' in portal_sync_text, (
+    "catalog sync must pass input paths without escaped expressions"
+)
 
 for path in WORKFLOWS:
     if path.name in REUSABLE:
