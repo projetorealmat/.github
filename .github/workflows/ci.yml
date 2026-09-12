@@ -19,5 +19,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Verificar arquitetura
         run: python3 scripts/verify_architecture.py
+      - name: Verificar contrato de publicações
+        run: python3 scripts/test_publication_contract.py
       - name: Verificar backend
         run: python3 scripts/test_pretext_contract.py
