@@ -22,6 +22,38 @@ A publicação principal funciona como ponto de entrada para os outros formatos:
 
 O README do repositório deve listar todos os links de todos os formatos. A lista completa fica disponível para quem consulta o repositório, mas não será reproduzida como vários botões na listagem do catálogo nem na página individual do livro.
 
+## Nível da tradução
+
+Cada edição deverá informar o nível de tradução associado à versão atualmente apresentada no catálogo e na página individual do livro.
+
+Os três níveis iniciais serão:
+
+| Versão | Código | Rótulo exibido |
+|---|---|---|
+| v0.x.x | unreviewed | Tradução não revisada |
+| v1.x.x | reviewed | Tradução revisada |
+| v2.x.x | adapted | Tradução revisada e adaptada |
+
+O nível será um metadado da edição/release, por exemplo:
+
+~~~json
+{
+  "translation_stage": "reviewed"
+}
+~~~
+
+Regras:
+
+- o código será validado pelo contrato central;
+- o rótulo será padronizado pelo portal, evitando que cada livro escreva uma variação;
+- o nível deverá ser compatível com o primeiro componente da versão;
+- v0.x.x não significa que o conteúdo esteja inutilizável; significa que a tradução ainda não passou pela revisão definida pelo REALMat;
+- v1.x.x identifica uma tradução revisada, mas ainda fiel ao original;
+- v2.x.x identifica uma tradução revisada que também recebeu adaptação autorizada;
+- o modelo poderá receber novos níveis no futuro sem obrigar o portal a conhecer detalhes editoriais de cada livro.
+
+A página individual e os itens da listagem poderão mostrar o rótulo junto da versão atual, por exemplo: **Tradução revisada · v1.0.0**. O nível não altera os dois botões nem a forma de acesso aos formatos.
+
 ## Contexto
 
 As edições atuais demonstram por que o contrato precisa ser genérico:
@@ -122,6 +154,7 @@ O catálogo armazenará o entrypoint, a lista completa de publicações e o repo
 ~~~json
 {
   "version": "v0.1.0",
+  "translation_stage": "unreviewed",
   "repository": "projetorealmat/forallx-yyc",
   "entrypoint": {
     "id": "html",
@@ -175,7 +208,7 @@ Cada repositório de livro:
 O README deve conter, no mínimo:
 
 1. identificação e descrição curta da edição;
-2. versão recomendada;
+2. versão recomendada e nível da tradução;
 3. seção com todos os formatos e seus links;
 4. indicação do entrypoint;
 5. arquivos e compilação específicos da edição;
@@ -203,6 +236,48 @@ Em uma edição que só oferece PDF:
 
 O visualizador do navegador oferece a opção de download.
 ~~~
+
+## Contribuição e edição
+
+O menu **Contribuir** do site será o ponto de entrada para as instruções gerais de participação no REALMat. Ele deverá explicar, de forma centralizada:
+
+- como localizar o repositório de uma edição;
+- como criar fork ou branch;
+- como propor alterações por pull request;
+- como acompanhar os checks;
+- como distinguir tradução não revisada, revisada e revisada e adaptada;
+- onde encontrar as fontes e os arquivos editáveis.
+
+A página individual do livro não repetirá esse manual. O botão **Repositório** levará diretamente ao repositório da edição, onde estarão os arquivos e as particularidades técnicas da obra. O README de cada livro poderá apontar para as instruções gerais do menu **Contribuir**, acrescentando somente orientações específicas quando necessário.
+
+## Escopo de adaptação do projeto e do site
+
+A demanda de implementação passa a incluir duas frentes relacionadas.
+
+### Adaptação do projeto REALMat e do contrato central
+
+- criar uma nova versão do contrato, sem alterar a referência @v2;
+- transportar e validar entrypoint e publications;
+- transportar e validar translation_stage;
+- manter compatibilidade com o catálogo e as releases legadas;
+- adaptar os repositórios de livros somente onde for necessário para fornecer os metadados e os links finais;
+- não centralizar BookML, PreTeXt, drivers LaTeX, scripts ou outros recursos específicos de uma edição.
+
+### Adaptação do site
+
+O site deverá ser adaptado porque a implementação atual assume PDF e apresenta ações adicionais na página individual. A adaptação necessária é limitada à camada de catálogo e navegação:
+
+- aceitar os metadados de vários formatos;
+- usar o entrypoint como destino de **Ler o livro**;
+- exibir somente **Ler o livro** e **Repositório** na página individual;
+- exibir o rótulo padronizado do nível da tradução;
+- manter no README e nos dados os links completos de todos os formatos;
+- preservar o menu **Contribuir** como local das instruções gerais;
+- continuar aceitando livros que tenham somente PDF;
+- não compilar formatos no site;
+- não criar botões individuais para PDF, EPUB, HTML, SCORM ou outras variantes.
+
+Quando o entrypoint for HTML, o site apenas apontará para a página HTML; o menu dos formatos será responsabilidade da própria publicação. Quando o entrypoint for PDF, o site apenas apontará para um PDF que abra no navegador; o download será feito pelo visualizador do navegador.
 
 ## Responsabilidades do .github central
 
