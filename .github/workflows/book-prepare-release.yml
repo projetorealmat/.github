@@ -251,6 +251,7 @@ jobs:
       - name: Criar Release PR
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          CONFIG: ${{ inputs.config }}
           BASE_BRANCH: ${{ steps.release.outputs.base_branch }}
           RELEASE_BRANCH: ${{ steps.release.outputs.release_branch }}
           RELEASE_TAG: ${{ steps.release.outputs.release_tag }}
