@@ -267,7 +267,8 @@ def main(argv: list[str] | None = None) -> int:
         elif args.output or args.json:
             raise ContractError("--output e --json exigem um manifesto resolvido.")
 
-        print("publication contract verification passed")
+        if not args.json:
+            print("publication contract verification passed")
         return 0
     except ContractError as error:
         print(f"publication contract error: {error}", file=sys.stderr)
