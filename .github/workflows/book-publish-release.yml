@@ -377,7 +377,31 @@ jobs:
               echo "A Release existente tem status incompatível."
               exit 1
             }
-            gh release upload "${RELEASE_TAG}" "${assets[@]}" --repo "${GITHUB_REPOSITORY}" --clobber
+            existing_release_assets="${RUNNER_TEMP}/release-assets"
+            mkdir -p "${existing_release_assets}"
+            existing_names="$(gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --json assets --jq '.assets[].name')"
+            missing_assets=()
+            for asset in "${assets[@]}"; do
+              if grep -Fxq -- "${asset}" <<< "${existing_names}"; then
+                gh release download "${RELEASE_TAG}" \
+                  --repo "${GITHUB_REPOSITORY}" \
+                  --pattern "${asset}" \
+                  --dir "${existing_release_assets}" \
+                  --clobber
+                expected_sha256="$(sha256sum "${asset}" | awk '{print $1}')"
+                actual_sha256="$(sha256sum "${existing_release_assets}/${asset}" | awk '{print $1}')"
+                [[ "${actual_sha256}" == "${expected_sha256}" ]] || {
+                  echo "O asset ${asset} já existe com conteúdo diferente; a release é imutável."
+                  exit 1
+                }
+                rm -f "${existing_release_assets}/${asset}"
+              else
+                missing_assets+=("${asset}")
+              fi
+            done
+            if ((${#missing_assets[@]} > 0)); then
+              gh release upload "${RELEASE_TAG}" "${missing_assets[@]}" --repo "${GITHUB_REPOSITORY}"
+            fi
             if [[ "$(jq -r '.isDraft' <<< "${release_json}")" == "true" ]]; then
               if [[ "${RELEASE_STATUS}" == "em revisão" ]]; then
                 gh release edit "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" --draft=false --prerelease
