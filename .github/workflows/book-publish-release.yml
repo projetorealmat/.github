@@ -100,6 +100,7 @@ jobs:
       pull-requests: read
     outputs:
       pdf_sha256: ${{ steps.package.outputs.pdf_sha256 }}
+      publication_manifest: ${{ steps.publications.outputs.manifest }}
       release_date: ${{ steps.metadata.outputs.release_date }}
       release_status: ${{ steps.metadata.outputs.release_status }}
       pdf_name: ${{ steps.config.outputs.pdf_name }}
@@ -124,6 +125,13 @@ jobs:
           repository: ${{ job.workflow_repository }}
           ref: ${{ job.workflow_sha }}
           path: .realmat-central
+
+      - name: Validar contrato de publicações
+        env:
+          CONFIG: ${{ inputs.config }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.release_tag }}
+        shell: bash
+        run: python3 .realmat-central/scripts/publication_contract.py --config "${CONFIG}" --version "${RELEASE_TAG}"
 
       - name: Ler configuração
         id: config
@@ -213,6 +221,7 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"release_date={released.group(1)}\n")
               output.write(f"release_status={status}\n")
+              output.write(f"translation_stage={config['translation_stage']}\n")
           PY
 
       - name: Validar conteúdo específico do livro
@@ -264,6 +273,19 @@ jobs:
         shell: bash
         run: bash .realmat-central/scripts/build-book.sh
 
+      - name: Resolver publicações
+        id: publications
+        env:
+          CONFIG: ${{ inputs.config }}
+          REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.resolve.outputs.release_tag }}
+          PDF_NAME: ${{ steps.config.outputs.pdf_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .realmat-central/scripts/publication_contract.py             --config "${CONFIG}"             --repository "${REPOSITORY}"             --tag "${RELEASE_TAG}"             --pdf-name "${PDF_NAME}"             --output publication-manifest.json
+          echo "manifest=$(jq -c . publication-manifest.json)" >> "${GITHUB_OUTPUT}"
+
       - name: Empacotar fontes e checksum
         id: package
         env:
@@ -273,6 +295,7 @@ jobs:
           RELEASE_COMMIT: ${{ needs.resolve.outputs.release_commit }}
           RELEASE_DATE: ${{ steps.metadata.outputs.release_date }}
           RELEASE_STATUS: ${{ steps.metadata.outputs.release_status }}
+          TRANSLATION_STAGE: ${{ steps.metadata.outputs.translation_stage }}
           RELEASE_PR: ${{ needs.resolve.outputs.release_pr }}
           SOURCE_URL: ${{ steps.config.outputs.source_url }}
         shell: bash
@@ -286,6 +309,7 @@ jobs:
             printf 'Versão: %s\n' "${RELEASE_TAG}"
             printf 'Data de publicação: %s\n' "${RELEASE_DATE}"
             printf 'Status editorial: %s\n' "${RELEASE_STATUS}"
+            printf 'Nível da tradução: %s\n' "${TRANSLATION_STAGE}"
             printf 'Commit: %s\n' "${RELEASE_COMMIT}"
             printf 'Release PR: #%s\n' "${RELEASE_PR}"
             if [[ -n "${SOURCE_URL:-}" ]]; then
@@ -405,11 +429,9 @@ jobs:
 
       - name: Montar payload do catálogo
         env:
-          PDF_NAME: ${{ needs.build.outputs.pdf_name }}
-          PDF_SHA256: ${{ needs.build.outputs.pdf_sha256 }}
+          PUBLICATION_MANIFEST: ${{ needs.build.outputs.publication_manifest }}
           RELEASE_TAG: ${{ needs.resolve.outputs.release_tag }}
           RELEASE_DATE: ${{ needs.build.outputs.release_date }}
-          RELEASE_STATUS: ${{ needs.build.outputs.release_status }}
           BOOK_ID: ${{ needs.build.outputs.book_id }}
           BOOK_TITLE: ${{ needs.build.outputs.book_title }}
           BOOK_SHORT_TITLE: ${{ needs.build.outputs.book_short_title }}
@@ -427,21 +449,19 @@ jobs:
 
           repository = os.environ["GITHUB_REPOSITORY"]
           tag = os.environ["RELEASE_TAG"]
+          manifest = json.loads(os.environ["PUBLICATION_MANIFEST"])
           book = {
               "id": os.environ["BOOK_ID"],
               "title": os.environ["BOOK_TITLE"],
               "short_title": os.environ["BOOK_SHORT_TITLE"],
               "subject": os.environ["BOOK_SUBJECT"],
               "version": tag,
-              "status": os.environ["RELEASE_STATUS"],
               "repository": repository,
               "ref": tag,
               "release_url": f"https://github.com/{repository}/releases/tag/{tag}",
-              "pdf_url": f"https://github.com/{repository}/releases/download/{tag}/{os.environ['PDF_NAME']}",
-              "pdf_path": f"/assets/books/{os.environ['BOOK_ID']}/{tag}/{os.environ['PDF_NAME']}",
-              "sha256": os.environ["PDF_SHA256"],
               "release_date": os.environ["RELEASE_DATE"],
           }
+          book.update(manifest)
           for key in ("source_url", "source_license"):
               if os.environ.get(key):
                   book[key] = os.environ[key]
