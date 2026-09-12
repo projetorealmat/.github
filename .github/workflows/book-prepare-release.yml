@@ -263,7 +263,7 @@ jobs:
           git config user.name "REALMat Automation"
           git config user.email "realmat-automation[bot]@users.noreply.github.com"
           git switch -c "${RELEASE_BRANCH}"
-          git add "${CITATION_FILE}" "${README_FILE}"
+          git add "${CITATION_FILE}" "${README_FILE}" "${CONFIG}"
           git commit -m "chore(release): prepare ${RELEASE_TAG}"
           git push --set-upstream origin "${RELEASE_BRANCH}"
           cat > "${RUNNER_TEMP}/release-pr.md" <<EOF
