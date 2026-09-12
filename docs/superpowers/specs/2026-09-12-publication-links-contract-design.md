@@ -81,7 +81,7 @@ O portal não deve impor BookML, PreTeXt, LaTeX, um diretório de saída ou qual
 - Fazer o portal descobrir formatos lendo texto livre do README.
 - Copiar obrigatoriamente todos os formatos para o Pages.
 - Inventar links para formatos ainda não publicados.
-- Alterar a tag @v2 do repositório central.
+- Escolher antecipadamente entre atualizar @v2 ou criar uma nova tag sem antes avaliar compatibilidade.
 - Exigir que todos os livros ofereçam PDF ou HTML.
 
 ## Contrato da publicação
@@ -279,6 +279,17 @@ O site deverá ser adaptado porque a implementação atual assume PDF e apresent
 
 Quando o entrypoint for HTML, o site apenas apontará para a página HTML; o menu dos formatos será responsabilidade da própria publicação. Quando o entrypoint for PDF, o site apenas apontará para um PDF que abra no navegador; o download será feito pelo visualizador do navegador.
 
+## Versionamento do contrato central
+
+A tag @v2 não será preservada por princípio. A escolha será feita após a auditoria de compatibilidade dos workflows consumidores:
+
+- se a extensão puder ser introduzida de forma compatível, atualizaremos @v2 e evitaremos manter duas versões;
+- se houver alteração incompatível no payload, nos gatilhos ou no comportamento esperado pelos livros, criaremos uma nova tag, como @v3, e migraremos os consumidores de forma coordenada;
+- não serão mantidas versões paralelas sem necessidade prática;
+- qualquer alteração da tag escolhida deverá ser acompanhada pela execução dos checks dos repositórios consumidores e do portal.
+
+O objetivo é usar a menor mudança de versionamento que preserve estabilidade e reduza manutenção.
+
 ## Responsabilidades do .github central
 
 O repositório central:
@@ -293,7 +304,6 @@ O repositório central:
 
 A edição ou seu workflow específico deve produzir os links finais. O contrato comum começa nesses links finais, e não na estrutura interna usada para gerar os arquivos.
 
-A implementação deve ser publicada como uma nova versão do contrato central. A referência @v2 e seu comportamento permanecerão intactos até a nova versão estar verificada.
 
 ## Responsabilidades do portal
 
@@ -313,7 +323,7 @@ O portal:
 ## Migração inicial
 
 1. Manter o catálogo atual funcionando para forallx e forallx-yyc.
-2. Adicionar o novo contrato e o comportamento de dois botões na página individual do livro em uma nova versão central.
+2. Auditar os consumidores e então atualizar @v2 ou criar uma nova versão somente se a compatibilidade exigir.
 3. Atualizar os READMEs dos livros com todos os links realmente disponíveis.
 4. Registrar forallx com PDF como entrypoint.
 5. Registrar forallx-yyc com PDF como entrypoint enquanto o HTML ainda não estiver efetivamente publicado.
