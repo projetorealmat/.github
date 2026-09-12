@@ -174,8 +174,9 @@ jobs:
               for index, candidate in enumerate(existing):
                   if candidate.get("version") == release["version"]:
                       if candidate != release:
-                          existing[index] = release
-                          changed = True
+                          raise SystemExit(
+                              f"Conflito de release para {release[\"version\"]}: os dados publicados não coincidem."
+                          )
                       replaced = True
                       break
               if not replaced:
