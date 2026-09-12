@@ -16,8 +16,8 @@ O contrato central validará a forma dos links, mas não implementará a produç
 
 As edições atuais já demonstram a diferença que o contrato precisa absorver:
 
-- `projetorealmat/forallx` usa `forallx.tex), XeLaTeX e atualmente publica o PDF `forallx.pdf`.
-- `projetorealmat/forallx-yyc` usa `forallxyyc.tex), pdfLaTeX e também possui drivers BookML para variantes de PDF, HTML e SCORM.
+- `projetorealmat/forallx` usa `forallx.tex`, XeLaTeX e atualmente publica o PDF `forallx.pdf`.
+- `projetorealmat/forallx-yyc` usa `forallxyyc.tex`, pdfLaTeX e também possui drivers BookML para variantes de PDF, HTML e SCORM.
 
 A estrutura do repositório de origem não deve ser reproduzida no portal nem imposta às demais traduções. O README de cada edição precisa explicar apenas o que é comum ao REALMat e o que é particular daquela obra.
 
@@ -78,7 +78,8 @@ Exemplo com formatos heterogêneos:
       "id": "pdf-accessible",
       "label": "PDF acessível",
       "role": "download",
-      "format": "pdf"
+      "format": "pdf",
+      "asset": "forallxyyc-accessible.pdf"
     },
     {
       "id": "html",
@@ -92,7 +93,7 @@ Exemplo com formatos heterogêneos:
       "label": "Pacote SCORM",
       "role": "download",
       "format": "scorm",
-      "asset": "SCORM.forallxyyc.zip"
+      "asset": "SCORM.forallxyyc-html.zip"
     }
   ]
 }
@@ -180,7 +181,7 @@ O portal deverá:
 - não conhece a estrutura interna de um livro;
 - não contém drivers ou recursos específicos de BookML.
 
-A implementação será publicada como uma nova versão do contrato central. A referência `@v2) e seu comportamento permanecerão intactos até a migração estar verificada.
+A implementação será publicada como uma nova versão do contrato central. A referência `@v2` e seu comportamento permanecerão intactos até a migração estar verificada.
 
 ### Portal
 
@@ -211,11 +212,11 @@ Detalhes completos da obra original permanecerão no README ou no repositório d
 
 ## Migração inicial
 
-1. Manter o catálogo atual funcionando para `forallx) e `forallx-yyc).
+1. Manter o catálogo atual funcionando para `forallx` e `forallx-yyc`.
 2. Adicionar o contrato de links ao validador central e ao validador do portal.
 3. Atualizar os READMEs dos dois livros para o padrão comum, sem inventar publicações ainda inexistentes.
 4. Registrar inicialmente o PDF já publicado de cada edição.
-5. Quando o `forallx-yyc) publicar HTML, acessível, impressão, carta, soluções ou SCORM, acrescentar somente os links realmente disponíveis.
+5. Quando o `forallx-yyc` publicar HTML, acessível, impressão, carta, soluções ou SCORM, acrescentar somente os links realmente disponíveis.
 6. Adicionar testes para:
    - edição apenas com PDF;
    - edição com PDF, HTML e SCORM;
@@ -228,10 +229,10 @@ Detalhes completos da obra original permanecerão no README ou no repositório d
 
 A arquitetura estará correta quando:
 
-- o portal puder catalogar `forallx) sem criar campos HTML vazios;
-- o portal puder catalogar `forallx-yyc) com vários links sem alteração específica no código;
+- o portal puder catalogar `forallx` sem criar campos HTML vazios;
+- o portal puder catalogar `forallx-yyc` com vários links sem alteração específica no código;
 - um terceiro livro puder declarar outro conjunto de links;
 - o README de cada livro permanecer curto e compreensível;
-- nenhum recurso específico de um livro precisar ser colocado no `.github) central;
+- nenhum recurso específico de um livro precisar ser colocado no `.github` central;
 - releases e links antigos continuarem válidos;
 - todos os checks do central, dos livros e do portal permanecerem verdes.
