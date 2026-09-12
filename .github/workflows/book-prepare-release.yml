@@ -74,12 +74,9 @@ jobs:
           set -euo pipefail
           python3 - "${CONFIG}" "${REQUESTED_VERSION}" "${REQUESTED_DATE}" <<'PY'
           import json
-          import json
           import os
           import re
           import sys
-          sys.path.insert(0, ".realmat-central/scripts")
-          from publication_contract import stage_for_version
           from datetime import date, datetime, timezone
           from pathlib import Path
 
@@ -176,10 +173,14 @@ jobs:
         run: |
           set -euo pipefail
           python3 - "${CONFIG}" "${RELEASE_TAG}" "${RELEASE_DATE}" "${CITATION_FILE}" "${README_FILE}" "${README_START}" "${README_END}" "${README_SENTENCE_ANCHOR}" "${README_SENTENCE_TEMPLATE}" <<'PY'
+          import json
           import os
           import re
           import sys
           from pathlib import Path
+
+          sys.path.insert(0, ".realmat-central/scripts")
+          from publication_contract import stage_for_version
 
           config_name, tag, release_date, citation_name, readme_name, start, end, sentence_anchor, sentence_template = sys.argv[1:]
           citation_path = Path(citation_name)
