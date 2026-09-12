@@ -208,7 +208,7 @@ jobs:
               output.write(f"release_url={book['release_url']}\n")
           PY
 
-          python3 "\${{ inputs.validator_script }}" "\${{ inputs.catalog_file }}"
+          python3 "${{ inputs.validator_script }}" "${{ inputs.catalog_file }}"
 
       - name: Publicar branch de automação
         if: steps.catalog.outputs.changed == 'true'
