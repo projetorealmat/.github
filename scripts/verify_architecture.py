@@ -7,6 +7,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 WORKFLOWS = sorted((ROOT / ".github" / "workflows").glob("*.yml"))
 REUSABLE = {
     "book-ci.yml",
@@ -28,6 +29,7 @@ all_text = "\n".join(path.read_text(encoding="utf-8") for path in WORKFLOWS)
 prepare_text = (ROOT / ".github/workflows/book-prepare-release.yml").read_text(encoding="utf-8")
 portal_sync_text = (ROOT / ".github/workflows/portal-catalog-sync.yml").read_text(encoding="utf-8")
 publish_text = (ROOT / ".github/workflows/book-publish-release.yml").read_text(encoding="utf-8")
+ci_text = CI_WORKFLOW.read_text(encoding="utf-8")
 
 for legacy_name in ("REALMAT_AUTOMATION_TOKEN", "PORTAL_DISPATCH_TOKEN"):
     assert legacy_name not in all_text, f"legacy credential remains: {legacy_name}"
@@ -60,6 +62,9 @@ assert all(
     if "gh release upload" in line
 ), "release uploads must not overwrite existing assets"
 assert "existing_release_assets" in publish_text, "release uploads must verify existing asset checksums"
+assert "name: contract / Validar contrato central" in ci_text, (
+    "central CI must preserve the required main-branch check context"
+)
 
 for path in WORKFLOWS:
     if path.name in REUSABLE:
