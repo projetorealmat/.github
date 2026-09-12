@@ -6,9 +6,9 @@
 
 ## Decisão
 
-O portal REALMat não exibirá um botão para cada formato de um livro.
+A listagem geral do REALMat continuará apresentando os livros como itens do catálogo. Os dois botões não ficam nessa listagem.
 
-Cada livro terá no portal somente duas ações:
+Ao abrir a página individual de um livro, por exemplo /livros/forallx/, serão exibidas somente duas ações:
 
 1. **Ler o livro** — abre a publicação principal;
 2. **Repositório** — abre o repositório da edição e dá acesso a fontes, arquivos editáveis, documentação e demais recursos.
@@ -20,7 +20,7 @@ A publicação principal funciona como ponto de entrada para os outros formatos:
 - o HTML deve conter um menu ou seção de navegação com os demais formatos publicados, incluindo PDF, EPUB, versões acessíveis, arquivos para impressão e outros;
 - se uma edição tiver vários formatos, mas não tiver HTML, deverá oferecer uma página de entrada equivalente, mantida pela própria edição, que reúna os links para esses formatos.
 
-O README do repositório deve listar todos os links de todos os formatos. A lista completa fica disponível para quem consulta o repositório, mas não será reproduzida como vários botões na página do livro do portal.
+O README do repositório deve listar todos os links de todos os formatos. A lista completa fica disponível para quem consulta o repositório, mas não será reproduzida como vários botões na listagem do catálogo nem na página individual do livro.
 
 ## Contexto
 
@@ -44,7 +44,7 @@ O portal não deve impor BookML, PreTeXt, LaTeX, um diretório de saída ou qual
 
 ## Fora do escopo
 
-- Criar uma lista de botões no portal para cada formato.
+- Criar uma lista de botões de formatos na listagem ou na página individual do livro.
 - Fazer o portal compilar HTML, PDF, EPUB, BookML, PreTeXt ou SCORM.
 - Fazer o portal descobrir formatos lendo texto livre do README.
 - Copiar obrigatoriamente todos os formatos para o Pages.
@@ -111,11 +111,11 @@ Exemplo para uma edição que oferece HTML, PDF e EPUB:
 - Quando o entrypoint for PDF, a URL deve permitir sua abertura no navegador, para que o usuário disponha do visualizador e da opção de download.
 - Quando houver HTML, ele será o entrypoint preferencial e deverá oferecer navegação para todas as demais publicações declaradas.
 - Se houver vários formatos sem HTML, a edição deverá fornecer uma página de entrada equivalente, com links para todos eles.
-- A ordem de publications será preservada no README e nos dados da release, mas não será transformada em vários botões na página do portal.
+- A ordem de publications será preservada no README e nos dados da release, mas não será transformada em botões na listagem ou na página individual do livro.
 - A lista completa pode conter links para releases, sites externos, leitores HTML ou outros serviços mantidos pela edição.
 - O contrato não terá um campo source dentro de publications. A origem do livro é metadado editorial separado.
 
-## Catálogo e comportamento do portal
+## Catálogo, listagem e página individual
 
 O catálogo armazenará o entrypoint, a lista completa de publicações e o repositório da edição.
 
@@ -145,12 +145,16 @@ O catálogo armazenará o entrypoint, a lista completa de publicações e o repo
 }
 ~~~
 
-Na página pública, o portal renderizará somente:
+Na listagem geral, o portal deverá apresentar o livro como item do catálogo e permitir o acesso à sua página individual. A listagem não exibirá botões para os formatos.
+
+Na página individual do livro, por exemplo /livros/forallx/, serão exibidos somente:
 
 - **Ler o livro** → URL do entrypoint;
-- **Repositório** → URL derivada do campo repository.
+- **Repositório** → URL do repositório da edição, derivada do campo repository.
 
-A lista publications será mantida nos dados para validação, sincronização e eventual uso futuro, mas não será apresentada como uma coleção de botões de formatos.
+Não haverá um botão separado para download, release, PDF, EPUB ou qualquer outro formato. O download deverá ocorrer pelo visualizador do PDF ou pelo menu da publicação principal.
+
+A lista publications será mantida nos dados para validação, sincronização, histórico e uso pelo README ou pelas publicações, mas não será apresentada como uma coleção de botões na página individual.
 
 O portal não deve mostrar botões vazios, não deve escolher um formato por heurística própria e não deve substituir o entrypoint informado pela edição.
 
@@ -220,9 +224,10 @@ A implementação deve ser publicada como uma nova versão do contrato central. 
 
 O portal:
 
+- apresenta os livros na listagem geral;
+- gera ou exibe a página individual de cada livro;
+- mantém nessa página somente as ações **Ler o livro** e **Repositório**;
 - valida os dados recebidos;
-- apresenta uma única ação de leitura;
-- apresenta uma única ação para o repositório;
 - preserva a lista completa no catálogo;
 - não compila livros;
 - não interpreta READMEs;
@@ -233,7 +238,7 @@ O portal:
 ## Migração inicial
 
 1. Manter o catálogo atual funcionando para forallx e forallx-yyc.
-2. Adicionar o novo contrato e o comportamento de dois botões em uma nova versão central.
+2. Adicionar o novo contrato e o comportamento de dois botões na página individual do livro em uma nova versão central.
 3. Atualizar os READMEs dos livros com todos os links realmente disponíveis.
 4. Registrar forallx com PDF como entrypoint.
 5. Registrar forallx-yyc com PDF como entrypoint enquanto o HTML ainda não estiver efetivamente publicado.
@@ -253,7 +258,7 @@ O portal:
 
 A arquitetura estará correta quando:
 
-- cada livro tiver somente os botões **Ler o livro** e **Repositório**;
+- a página individual de cada livro tiver somente os botões **Ler o livro** e **Repositório**;
 - um livro somente com PDF abrir o PDF no navegador;
 - um livro com HTML abrir o HTML, cujo menu conduza aos demais formatos;
 - todos os links de formato estiverem disponíveis no README da edição;
